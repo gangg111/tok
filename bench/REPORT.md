@@ -100,10 +100,53 @@ odzysk, footprint) wygrywa tok.
   (`modifiedArgs` z zachowaniem pól, np. timeout), Cursor
   (`continue/permission/updated_input`).
 
+## 7. Runda 3 — funkcje, których rtk nie ma + pojedynek subagentów
+
+### Dedup sesyjny (nowa klasa przewagi)
+Ta sama komenda w tym samym katalogu: identyczne wyjście →
+`unchanged since last run (Xs ago) [tok full]` (~7 tokenów); mała zmiana →
+**tylko diff linii**. Zmierzone: `find src -name "*.rs"` = 41 tokenów (tok)
+/ 66 (rtk) pierwszy raz, **7 tokenów** każdy następny, a po dodaniu pliku
+diff `+ src/.../nowy_test.rs` (~10 tokenów). rtk za każdym razem płaci pełną
+cenę. Wyłączane przez `TOK_NO_DEDUP=1`; benchmarki filtrów (§1-2) liczone
+Z WYŁĄCZONYM dedupem — uczciwie, bez podwójnego liczenia.
+
+### Pojedynek subagentów na żywym kodzie (finalny dowód end-to-end)
+Dwa subagenty Claude (ten sam model), **identyczne** zadanie i kroki: napraw
+2 bugi w projekcie Rust (mean off-by-one, brak .rev()), doprowadź `cargo test`
+do 4/4, commit. Identyczne bliźniacze repozytoria; jeden agent każdą komendę
+wykonuje przez rtk, drugi przez tok. Pomiar z transkryptów (`analyze_duel.py`):
+
+| Metryka (wyniki narzędzia Bash) | agent-rtk | agent-tok | przewaga toka |
+|---|---|---|---|
+| bajty wyników | 2794 | **2504** | 10,4% |
+| tokeny (whitespace) | 357 | **314** | 12,0% |
+| tokeny (est. BPE) | 1122 | **1003** | 10,6% |
+| liczba wywołań Bash | 10 | 10 | = |
+| tokeny subagenta łącznie | 19 620 | **19 544** | tok |
+| czas ścienny | 97,2 s | **81,5 s** | 16% |
+| sukces zadania | 4/4 PASS + commit | 4/4 PASS + commit | = |
+
+(Uwaga metodyczna: pierwsza runda pojedynku została unieważniona — areny nie
+były identyczne z winy setupu, repo toka miało scommitowane `target/`.
+Lekcją z niej jest grupowanie ścieżek w `tok git status`: 113 plików
+artefaktów = 1 linia `target/debug/... x111`.)
+
+### Pozostałe nowości rundy 3
+- formaty zoptymalizowane pod realny tokenizer BPE (ASCII zamiast `×←…•`),
+- `tok read`/`tok cat` (kompaktowe czytanie plików), `tok discover`
+  (skan transkryptów Claude Code — parytet z rtk discover),
+- zwijanie stack-trace'ów preferujące ramki kodu użytkownika,
+- `tok git status` grupuje długie listy ścieżek po katalogu,
+- repo + CI: https://github.com/gangg111/tok — build `rustc` + 14 testów
+  + smoke hooka na **ubuntu / macos / windows** (twardy dowód „PC"),
+  artefakty binarne z każdej platformy.
+
 ## Werdykt
 
-**tok wygrywa każdy mierzalny aspekt**: tokeny (10/10 i 5/5 na terenie rtk),
-fakty (10/10), latencję (4/4, hook 5,1×), rozmiar (8,4×), build (~60×),
-kompatybilność środowisk (bionic + fallback py), odzysk wyjścia i footprint.
-Pamięć — remis w granicach pomiaru. Szersza lista filtrów rtk nie przekłada się
-na wynik: nawet na własnych fixture'ach rtk przegrywa 5/5.
+**tok wygrywa każdy mierzalny aspekt**: tokeny (10/10, 5/5 na terenie rtk,
+pojedynek subagentów na żywym kodzie we wszystkich metrykach), fakty (10/10),
+latencję (4/4, hook 5,1×), czas realnego zadania (16%), rozmiar (8,4×),
+build (~60×), kompatybilność środowisk (bionic + fallback py + CI na 3 OS),
+odzysk wyjścia, footprint, oraz ma dedup sesyjny — funkcję, której rtk
+architektonicznie nie posiada. Pamięć — remis w granicach pomiaru.

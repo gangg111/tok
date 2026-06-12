@@ -14,28 +14,26 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: build (plain rustc, no cargo)
-        run: rustc -O -o tok${{ runner.os == 'Windows' && '.exe' || '' }} tok.rs
-      - name: unit tests
-        run: |
-          rustc --test -o tok-test${{ runner.os == 'Windows' && '.exe' || '' }} tok.rs
-          ./tok-test${{ runner.os == 'Windows' && '.exe' || '' }}
-      - name: smoke (generic filter + hook contract)
+      - name: build, unit tests, smoke, latency
         shell: bash
         run: |
-          ./tok* --version
-          echo '{"tool_name":"Bash","tool_input":{"command":"git status"}}' | ./tok* hook claude | grep -q updatedInput
-      - name: startup latency (20 runs)
-        shell: bash
-        run: |
+          EXE=""
+          [ "$RUNNER_OS" = "Windows" ] && EXE=".exe"
+          rustc -O -o tok-bin$EXE tok.rs
+          rustc --test -o tok-unittests$EXE tok.rs
+          ./tok-unittests$EXE
+          ./tok-bin$EXE --version
+          echo '{"tool_name":"Bash","tool_input":{"command":"git status"}}' \
+            | ./tok-bin$EXE hook claude | grep -q updatedInput
+          ./tok-bin$EXE run -- git --version
           start=$(date +%s%N)
-          for i in $(seq 20); do ./tok* --version >/dev/null; done
+          for i in $(seq 20); do ./tok-bin$EXE --version >/dev/null; done
           end=$(date +%s%N)
           echo "startup avg: $(( (end-start)/20/1000000 )) ms"
       - uses: actions/upload-artifact@v4
         with:
           name: tok-${{ matrix.os }}
-          path: tok*
+          path: tok-bin*
 
   python-fallback:
     name: python fallback (${{ matrix.os }})

@@ -6,6 +6,7 @@ in its test suite), plus chars. rtk's "[rtk] /!\\ No hook installed" banner
 is stripped from rtk outputs (courtesy: it would not appear with a hook).
 """
 import os, re, subprocess, sys, time, json
+os.environ["TOK_NO_DEDUP"] = "1"  # benchmark poszczegolnych filtrow, nie deduplikacji
 
 HOME = os.path.expanduser("~")
 RTK = os.path.join(HOME, "rtk-upstream", "target", "release", "rtk")
