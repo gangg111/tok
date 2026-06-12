@@ -1,0 +1,54 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  native:
+    name: build & test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: build (plain rustc, no cargo)
+        run: rustc -O -o tok${{ runner.os == 'Windows' && '.exe' || '' }} tok.rs
+      - name: unit tests
+        run: |
+          rustc --test -o tok-test${{ runner.os == 'Windows' && '.exe' || '' }} tok.rs
+          ./tok-test${{ runner.os == 'Windows' && '.exe' || '' }}
+      - name: smoke (generic filter + hook contract)
+        shell: bash
+        run: |
+          ./tok* --version
+          echo '{"tool_name":"Bash","tool_input":{"command":"git status"}}' | ./tok* hook claude | grep -q updatedInput
+      - name: startup latency (20 runs)
+        shell: bash
+        run: |
+          start=$(date +%s%N)
+          for i in $(seq 20); do ./tok* --version >/dev/null; done
+          end=$(date +%s%N)
+          echo "startup avg: $(( (end-start)/20/1000000 )) ms"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tok-${{ matrix.os }}
+          path: tok*
+
+  python-fallback:
+    name: python fallback (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: smoke
+        shell: bash
+        run: |
+          sed -i.bak '1s|.*|#!/usr/bin/env python3|' tok.py
+          python3 tok.py --version
+          python3 tok.py run -- git --version

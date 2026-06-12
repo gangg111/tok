@@ -1,0 +1,8 @@
+tok-native
+tok-test
+bench/turf/
+bench/arena/
+bench/outputs*/
+bench/corpus/
+bench/scratch-repo/
+bench/errcrate/target/
