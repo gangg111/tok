@@ -463,6 +463,42 @@ def h_git(cmd):
     return generic_filter(p["out"], p["code"]), p["code"]
 
 
+def cargo_test_summary(kept, code):
+    """On a fully green `cargo test`, collapse the per-suite `test result:`
+    lines into one total; any failure keeps the detailed output untouched."""
+    if code != 0:
+        return None
+    suites = passed = failed = ignored = 0
+    secs = 0.0
+    for ln in kept:
+        t = ln.lstrip()
+        if not t.startswith("test result:"):
+            continue
+        if not t.startswith("test result: ok. "):
+            return None
+        suites += 1
+        for part in t[len("test result: ok. "):].split(";"):
+            p = part.strip()
+            m = re.match(r"(\d+) (passed|failed|ignored)\b", p)
+            if m:
+                n = int(m.group(1))
+                if m.group(2) == "passed":
+                    passed += n
+                elif m.group(2) == "failed":
+                    failed += n
+                else:
+                    ignored += n
+            m = re.search(r"finished in ([\d.]+)s", p)
+            if m:
+                secs += float(m.group(1))
+    if not suites or failed:
+        return None
+    s = "cargo test: %d passed" % passed
+    if ignored:
+        s += ", %d ignored" % ignored
+    return s + " (%d suite%s, %.2fs)" % (suites, "" if suites == 1 else "s", secs)
+
+
 def h_cargo(cmd):
     p = run_raw(cmd)
     text = resolve_cr(strip_ansi(p["out"]))
@@ -492,6 +528,11 @@ def h_cargo(cmd):
                 or re.match(r"^test .*(FAILED|panicked)", s) or "FAILED" in s \
                 or re.match(r"^failures:", s):
             kept.append(s)
+    summary = cargo_test_summary(kept, p["code"])
+    if summary:
+        kept = [ln for ln in kept
+                if not re.match(r"^\s*(test result:|Running|Doc-tests|Finished)", ln)]
+        kept.insert(0, summary)
     if warn:
         kept.append("(%d warnings hidden)" % warn)
     out = "\n".join(kept).strip("\n")

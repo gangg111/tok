@@ -1222,6 +1222,62 @@ fn h_git(cmd: &[String]) -> (String, i32) {
     }
 }
 
+/// On a fully green `cargo test`, collapse the per-suite `test result:` lines
+/// into one total; any failure keeps the detailed output untouched.
+fn cargo_test_summary(kept: &[String], code: i32) -> Option<String> {
+    if code != 0 {
+        return None;
+    }
+    let (mut suites, mut passed, mut failed, mut ignored) = (0usize, 0usize, 0usize, 0usize);
+    let mut secs = 0.0f64;
+    for ln in kept {
+        let t = ln.trim_start();
+        let rest = match t.strip_prefix("test result: ok. ") {
+            Some(r) => r,
+            None => {
+                if t.starts_with("test result:") {
+                    return None;
+                }
+                continue;
+            }
+        };
+        suites += 1;
+        for part in rest.split(';') {
+            let p = part.trim();
+            let mut it = p.split_whitespace();
+            if let (Some(num), Some(word)) = (it.next(), it.next()) {
+                if let Ok(n) = num.parse::<usize>() {
+                    match word {
+                        "passed" => passed += n,
+                        "failed" => failed += n,
+                        "ignored" => ignored += n,
+                        _ => {}
+                    }
+                }
+            }
+            if let Some(i) = p.find("finished in ") {
+                if let Ok(s) = p[i + 12..].trim_end_matches('s').parse::<f64>() {
+                    secs += s;
+                }
+            }
+        }
+    }
+    if suites == 0 || failed > 0 {
+        return None;
+    }
+    let mut s = format!("cargo test: {} passed", passed);
+    if ignored > 0 {
+        s.push_str(&format!(", {} ignored", ignored));
+    }
+    s.push_str(&format!(
+        " ({} suite{}, {:.2}s)",
+        suites,
+        if suites == 1 { "" } else { "s" },
+        secs
+    ));
+    Some(s)
+}
+
 fn h_cargo(cmd: &[String]) -> (String, i32) {
     let (raw, code) = run_raw(cmd);
     let text = resolve_cr(&strip_ansi(&raw));
@@ -1267,6 +1323,14 @@ fn h_cargo(cmd: &[String]) -> (String, i32) {
             || s.contains("FAILED") || s.starts_with("failures:") {
             kept.push(s.to_string());
         }
+    }
+    if let Some(sum) = cargo_test_summary(&kept, code) {
+        kept.retain(|ln| {
+            let t = ln.trim_start();
+            !(t.starts_with("test result:") || t.starts_with("Running")
+                || t.starts_with("Doc-tests") || t.starts_with("Finished"))
+        });
+        kept.insert(0, sum);
     }
     if warn > 0 {
         kept.push(format!("({} warnings hidden)", warn));
@@ -1784,6 +1848,26 @@ fn usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cargo_test_success_aggregates_suites() {
+        let kept: Vec<String> = vec![
+            "     Running unittests src/lib.rs (target/debug/deps/x-abc)".into(),
+            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s".into(),
+            "     Running tests/basic.rs (target/debug/deps/basic-def)".into(),
+            "test result: ok. 4 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.02s".into(),
+            "   Doc-tests x".into(),
+            "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s".into(),
+        ];
+        let s = cargo_test_summary(&kept, 0).unwrap();
+        assert_eq!(s, "cargo test: 5 passed, 1 ignored (3 suites, 0.03s)");
+        // failures (or any non-zero exit) must keep the detailed output
+        assert!(cargo_test_summary(&kept, 101).is_none());
+        let failed: Vec<String> = vec![
+            "test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s".into(),
+        ];
+        assert!(cargo_test_summary(&failed, 0).is_none());
+    }
 
     #[test]
     fn cap_list_truncates_with_count() {
