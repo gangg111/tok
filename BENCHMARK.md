@@ -20,7 +20,7 @@
   <tr><td>Commands unknown to the tool (ffmpeg, pkg…)</td><td align="center">0% (raw)</td><td align="center"><b>76–93%</b></td><td align="center">✅ tok</td></tr>
   <tr><td>Retention of key facts</td><td align="center">9/10</td><td align="center"><b>10/10</b></td><td align="center">✅ tok</td></tr>
   <tr><td>Latency (4 paths, incl. the hook)</td><td align="center">—</td><td align="center"><b>1.2–5.1× faster</b></td><td align="center">✅ tok 4/4</td></tr>
-  <tr><td>Subagent duel on live code (phone · PC)</td><td align="center">wins on PC</td><td align="center">wins on phone</td><td align="center">📱 tok · 💻 rtk</td></tr>
+  <tr><td>Subagent duel on live code (phone + PC ×2)</td><td align="center">won PC round 1</td><td align="center"><b>wins phone + PC rematch</b></td><td align="center">✅ tok 2:1</td></tr>
   <tr><td>Session dedup (repeated command)</td><td align="center">none</td><td align="center"><b>41 → 7 tokens</b></td><td align="center">✅ tok</td></tr>
   <tr><td>Binary size</td><td align="center">7.0 MB</td><td align="center"><b>836 kB</b></td><td align="center">✅ tok (8.4×)</td></tr>
   <tr><td>Build from source</td><td align="center">2 m 04 s (cargo)</td><td align="center"><b>~2 s</b> (plain rustc)</td><td align="center">✅ tok (~60×)</td></tr>
@@ -112,7 +112,8 @@
   <tr><td><b>PreToolUse hook</b></td><td align="right">37.6 ms</td><td align="right"><b>13.8 ms</b></td><td align="center">✅ tok 2.7×</td></tr>
   <tr><td>binary size</td><td align="right">8.4 MB</td><td align="right"><b>608 kB</b></td><td align="center">✅ tok 14.2×</td></tr>
   <tr><td><code>ls C:\Windows\System32</code> (raw <code>dir</code> = 26,043 tokens)</td><td align="right">❌ error</td><td align="right"><b>17 tokens</b></td><td align="center">✅ tok</td></tr>
-  <tr><td>subagent duel (twin repos, 2 planted bugs)</td><td align="right"><b>wins all traffic metrics</b></td><td align="right">4/4 + commit, but more traffic</td><td align="center">✅ rtk</td></tr>
+  <tr><td>subagent duel, round 1 (twin repos, 2 planted bugs)</td><td align="right"><b>wins all traffic metrics</b></td><td align="right">4/4 + commit, but more traffic</td><td align="center">✅ rtk</td></tr>
+  <tr><td>subagent duel, rematch (after tok's cargo-tally fix)</td><td align="right">4/4 + commit</td><td align="right"><b>−24% bytes, −23% tokens, equal calls</b></td><td align="center">✅ tok</td></tr>
   <tr><td>session dedup (<code>ls</code>, 30-file dir, 3 calls)</td><td align="right">62 tokens each call</td><td align="right"><b>14 → 8 → 14</b></td><td align="center">✅ tok</td></tr>
   <tr><td>unit tests</td><td align="right">—</td><td align="right"><b>16/16 ✅</b></td><td align="center">✅ tok</td></tr>
 </table>
@@ -124,10 +125,15 @@ identical list of steps. One agent ran every command through rtk, the other thro
 Measured from the agents' transcripts (`bench/analyze_duel.py`). Run twice: on the
 phone (Termux) and, with fresh twin arenas, on the PC (Windows 11, 2026-06-12).
 
-**Honest split**: on the phone tok won every metric; on the PC **rtk won every
-metric** — rtk's cargo filter aggregates the final tally (`4 passed (3 suites)`)
+**Honest history**: on the phone tok won every metric. On the PC **round 1 went
+to rtk** — rtk's cargo filter aggregates the final tally (`4 passed (3 suites)`)
 while tok left three per-suite `test result:` lines, so the tok agent re-ran
-`cargo test` once more to be sure (1 extra call, +15% wall-time). All four lanes
+`cargo test` once more to be sure (1 extra call, +15% wall-time). After fixing
+exactly that (tok now emits `cargo test: 4 passed (3 suites, 0.00s)`), a
+**rematch on fresh byte-identical arenas flipped the result: tok won every
+traffic metric** (−24.2% bytes, −23.1% tokens, equal call count, slightly
+faster). rtk's own traffic was byte-for-byte identical across both PC rounds
+(1699 B / 208 / 642), isolating the fix as the only variable. All six lanes
 finished 4/4 tests PASS + commit.
 
 <table>
@@ -160,9 +166,26 @@ finished 4/4 tests PASS + commit.
   <tr><td>success (tests 4/4 + commit)</td><td align="center">✅</td><td align="center">✅</td><td align="center">🤝</td></tr>
 </table>
 
-<sub>The PC duel used the PowerShell tool — this machine hooks the Bash tool globally
+<table>
+  <tr>
+    <th align="left">Metric — PC rematch (after tok's cargo-tally fix)</th>
+    <th align="right">agent-rtk</th>
+    <th align="right">agent-tok</th>
+    <th align="center">tok's edge</th>
+  </tr>
+  <tr><td>result bytes</td><td align="right">1699</td><td align="right"><b>1287</b></td><td align="center">24.2%</td></tr>
+  <tr><td>tokens (whitespace)</td><td align="right">208</td><td align="right"><b>160</b></td><td align="center">23.1%</td></tr>
+  <tr><td>tokens (est. BPE)</td><td align="right">642</td><td align="right"><b>480</b></td><td align="center">25.2%</td></tr>
+  <tr><td>shell calls</td><td align="right">9</td><td align="right">9</td><td align="center">🤝</td></tr>
+  <tr><td>agent output tokens</td><td align="right"><b>3089</b></td><td align="right">3279</td><td align="center">−6.2%</td></tr>
+  <tr><td>task time</td><td align="right">96.7 s</td><td align="right"><b>95.1 s</b></td><td align="center">1.7%</td></tr>
+  <tr><td>success (tests 4/4 + commit)</td><td align="center">✅</td><td align="center">✅</td><td align="center">🤝</td></tr>
+</table>
+
+<sub>The PC duels used the PowerShell tool — this machine hooks the Bash tool globally
 through rtk (<code>rtk hook claude</code>), which would have rewritten both lanes' commands.
-Twin arenas were byte-identical (same initial commit hash), same model, same step list.</sub>
+Twin arenas were byte-identical (same initial commit hash), same model, same step list;
+the rematch used fresh arenas at new paths so round-1 dedup cache could not leak in.</sub>
 
 ## ♻️ Session dedup — a feature rtk doesn't have
 
@@ -191,5 +214,6 @@ incompatible find.exe before PATH.</sub>
 - the first round of the subagent duel was **invalidated** (unequal arenas due to a setup fault) and re-run on identical ones,
 - the only tie: RSS memory (~12 MB for both — Android baseline); rtk has numerically more specialized filters (100+), yet loses even on its own fixtures,
 - the PC duel (Windows 11, 2026-06-12) used the PowerShell tool, because this machine hooks the Bash tool globally through rtk — the hook would have rewritten both lanes' commands; arenas were byte-identical twins (same initial commit hash),
-- the PC duel result — **rtk winning every traffic metric** — is reported as-is; cause analysis: tok's per-suite `cargo test` output pushed its agent into one extra verification run,
+- the PC round-1 result — **rtk winning every traffic metric** — is reported as-is; cause analysis: tok's per-suite `cargo test` output pushed its agent into one extra verification run,
+- the PC rematch (after fixing exactly that) ran on fresh byte-identical arenas at new paths (round-1 dedup cache could not leak in); rtk's traffic was byte-identical across both rounds, isolating tok's fix as the only variable — **tok won the rematch in every traffic metric**,
 - the PC dedup scenario uses `ls` instead of `find` (Windows resolves `find` to System32's incompatible find.exe before PATH); fixture replay (Benchmark 2) has no PC rerun — neither tool can spawn `.bat` shims, an equal limitation.
