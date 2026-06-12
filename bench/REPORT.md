@@ -138,9 +138,11 @@ artefaktów = 1 linia `target/debug/... x111`.)
   (skan transkryptów Claude Code — parytet z rtk discover),
 - zwijanie stack-trace'ów preferujące ramki kodu użytkownika,
 - `tok git status` grupuje długie listy ścieżek po katalogu,
-- repo + CI: https://github.com/gangg111/tok — build `rustc` + 14 testów
-  + smoke hooka na **ubuntu / macos / windows** (twardy dowód „PC"),
-  artefakty binarne z każdej platformy.
+- repo + CI: https://github.com/gangg111/tok — **wszystkie 6 jobów zielone**:
+  build `rustc` + 14 testów + smoke hooka + fallback Python na
+  **ubuntu / macos / windows** (twardy, zmierzony dowód „PC");
+  startup natywnego toka na PC: 1 ms (ubuntu), 2 ms (macos), 17 ms (windows);
+  artefakty binarne z każdej platformy do pobrania z Actions.
 
 ## Werdykt
 
