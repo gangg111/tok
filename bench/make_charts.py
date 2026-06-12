@@ -14,7 +14,7 @@ FG, MUTED = "#e6edf3", "#8b949e"
 C_TOK, C_RTK = "#3fb950", "#6e7681"
 FONT = "'Segoe UI', Helvetica, Arial, sans-serif"
 
-W, LEFT, RIGHT, TOP, ROW = 820, 240, 90, 66, 44
+W, LEFT, RIGHT, TOP, ROW = 820, 260, 90, 66, 44
 PLOT = W - LEFT - RIGHT
 
 
@@ -113,7 +113,7 @@ os.makedirs(OUT, exist_ok=True)
 bar_chart(
     "bench1.svg",
     "Token savings — 10 real-world commands",
-    "share of output tokens removed (higher is better) · phone = Termux/aarch64 unless marked (PC) · whitespace metric",
+    "share of output tokens removed (higher is better) · rows = phone (Termux) unless marked (PC) · whitespace metric",
     [
         ("ls (large directory)", *pct(80.3, 94.8)),
         ("find *.rs (entire src)", *pct(37.7, 61.3)),
@@ -126,7 +126,7 @@ bar_chart(
         ("ffmpeg encode *", *pct(0.0, 75.5)),
         ("pkg list-installed *", -0.7, "-0.7%", 92.8, "92.8%"),
         ("ls C:\\Windows\\System32 (PC)", 0.0, "error", 99.9, "99.9%"),
-        ("TOTAL (phone)", *pct(27.8, 86.6)),
+        ("TOTAL — phone (Termux)", *pct(27.8, 86.6)),
     ],
     100, (25, 50, 75, 100), "%",
     note="* unknown to rtk — passed through raw · PC row: raw dir = 26,043 tokens, tok = 17; rtk fails without an ls binary on PATH",
@@ -142,7 +142,7 @@ bar_chart(
         ("mvn test FAILED", *pct(48.7, 59.0)),
         ("mvn install OK", *pct(74.9, 92.1)),
         ("glab CI trace (failed)", *pct(45.9, 48.0)),
-        ("TOTAL (phone)", *pct(54.9, 65.3)),
+        ("TOTAL — phone (Termux)", *pct(54.9, 65.3)),
     ],
     100, (25, 50, 75, 100), "%",
     note="no PC rerun: the replay needs shell shims and on Windows neither rtk nor tok can spawn .bat shims (equal limitation)",
@@ -151,14 +151,14 @@ bar_chart(
 bar_chart(
     "latency.svg",
     "Latency — phone and PC",
-    "mean of 30 runs after warm-up · lower is better · phone = Termux/aarch64 · PC = Windows 11 x64",
+    "mean of 30 runs after warm-up · lower is better · PC = Windows 11 x64",
     [
-        ("startup (phone)", *ms(11.1, 9.2)),
-        ("git status e2e (phone)", *ms(41.5, 25.5)),
-        ("ls, large dir (phone)", *ms(17.9, 10.0)),
-        ("PreToolUse hook (phone)", *ms(51.0, 10.0)),
-        ("startup (PC)", *ms(21.7, 10.8)),
-        ("PreToolUse hook (PC)", *ms(37.6, 13.8)),
+        ("startup — phone (Termux)", *ms(11.1, 9.2)),
+        ("git status e2e — phone (Termux)", *ms(41.5, 25.5)),
+        ("ls, large dir — phone (Termux)", *ms(17.9, 10.0)),
+        ("PreToolUse hook — phone (Termux)", *ms(51.0, 10.0)),
+        ("startup — PC", *ms(21.7, 10.8)),
+        ("PreToolUse hook — PC", *ms(37.6, 13.8)),
     ],
     55, (10, 20, 30, 40, 50), " ms",
     note="the PreToolUse hook fires on every single Bash call — tok is 5.1x faster on the phone, 2.7x on the PC",
@@ -179,14 +179,14 @@ bar_chart(
 bar_chart(
     "dedup.svg",
     "Session dedup — repeated command",
-    "tokens emitted per call · phone: find src *.rs · PC: ls on a 30-file dir · rtk has no such feature",
+    "tokens emitted per call · phone scenario: find src *.rs · PC scenario: ls on a 30-file dir · rtk has no dedup",
     [
-        ("1st call (phone)", 66, "66 tokens", 41, "41 tokens"),
-        ("2nd, no changes (phone)", 66, "66", 7, '7 — "unchanged since last run"'),
-        ("3rd, +1 file (phone)", 66, "66", 10, "~10 — one-line diff only"),
-        ("1st call (PC)", 62, "62 tokens", 14, "14 tokens"),
-        ("2nd, no changes (PC)", 62, "62", 8, '8 — "unchanged since last run"'),
-        ("3rd, +1 file (PC)", 62, "62", 14, "14 — full re-list"),
+        ("1st call — phone (Termux)", 66, "66 tokens", 41, "41 tokens"),
+        ("2nd, no changes — phone (Termux)", 66, "66", 7, '7 — "unchanged since last run"'),
+        ("3rd, +1 file — phone (Termux)", 66, "66", 10, "~10 — one-line diff only"),
+        ("1st call — PC", 62, "62 tokens", 14, "14 tokens"),
+        ("2nd, no changes — PC", 62, "62", 8, '8 — "unchanged since last run"'),
+        ("3rd, +1 file — PC", 62, "62", 14, "14 — full re-list"),
     ],
     70, (20, 40, 60), "",
     note="PC 3rd call falls back to the full (still compact) listing — re-wrapped ls lines no longer make a short diff",
@@ -197,14 +197,14 @@ bar_chart(
     "Subagent duel — same task on live code",
     "two Claude subagents, twin repos with 2 planted bugs · bars normalized to the rtk agent (=100%) · lower is better",
     [
-        ("result bytes (phone)", 100, "2794 B", 89.6, "2504 B"),
-        ("result bytes (PC)", 100, "1699 B", 111.3, "1891 B"),
-        ("tokens, whitespace (phone)", 100, "357", 88.0, "314"),
-        ("tokens, whitespace (PC)", 100, "208", 106.3, "221"),
-        ("tokens, est. BPE (phone)", 100, "1122", 89.4, "1003"),
-        ("tokens, est. BPE (PC)", 100, "642", 108.9, "699"),
-        ("task wall-time (phone)", 100, "97.2 s", 83.9, "81.5 s"),
-        ("task wall-time (PC)", 100, "98.3 s", 115.5, "113.5 s"),
+        ("result bytes — phone (Termux)", 100, "2794 B", 89.6, "2504 B"),
+        ("result bytes — PC", 100, "1699 B", 111.3, "1891 B"),
+        ("tokens, ws — phone (Termux)", 100, "357", 88.0, "314"),
+        ("tokens, ws — PC", 100, "208", 106.3, "221"),
+        ("tokens, BPE — phone (Termux)", 100, "1122", 89.4, "1003"),
+        ("tokens, BPE — PC", 100, "642", 108.9, "699"),
+        ("wall-time — phone (Termux)", 100, "97.2 s", 83.9, "81.5 s"),
+        ("wall-time — PC", 100, "98.3 s", 115.5, "113.5 s"),
     ],
     120, (25, 50, 75, 100), "%",
     note="phone: tok won every metric · PC: rtk won every metric — tok's cargo tally pushed its agent into one extra verify run · all four lanes: 4/4 tests PASS + commit",
