@@ -56,7 +56,7 @@ tok hook claude|gemini|copilot|cursor   hook entrypoints (JSON on stdin)
 ## Tests
 
 ```sh
-rustc --test -o tok-test tok.rs && ./tok-test   # 14 unit tests
+rustc --test -o tok-test tok.rs && ./tok-test   # 16 unit tests
 python3 bench/bench.py                          # 10-case benchmark vs rtk
 python3 bench/bench2.py                         # rtk's own fixtures benchmark
 python3 bench/latency.py                        # latency benchmark
@@ -96,6 +96,11 @@ python3 bench/latency.py                        # latency benchmark
 
 ## 📊 Benchmark 1 — 10 real-world commands
 
+![Token savings — 10 real-world commands](assets/bench1.svg)
+
+<details>
+<summary>data table</summary>
+
 <table>
   <tr>
     <th align="left">Case</th>
@@ -120,7 +125,14 @@ python3 bench/latency.py                        # latency benchmark
 
 <sub>\* rtk lost file names in this case (hook_cmd.rs, toml_filter.rs) — information loss.</sub>
 
+</details>
+
 ## 🏟️ Benchmark 2 — rtk's home turf (replay of its own test fixtures)
+
+![Token savings — rtk's own test fixtures](assets/bench2.svg)
+
+<details>
+<summary>data table</summary>
 
 <table>
   <tr>
@@ -139,7 +151,14 @@ python3 bench/latency.py                        # latency benchmark
   <tr><td><b>TOTAL</b></td><td align="right"><b>847</b></td><td align="right"><b>382</b></td><td align="right"><b>54.9%</b></td><td align="right"><b>294</b></td><td align="right"><b>65.3%</b></td></tr>
 </table>
 
+</details>
+
 ## ⚡ Latency (mean of 30 runs after warm-up, Termux/aarch64)
+
+![Latency — Termux/aarch64](assets/latency.svg)
+
+<details>
+<summary>data table</summary>
 
 <table>
   <tr>
@@ -154,13 +173,52 @@ python3 bench/latency.py                        # latency benchmark
   <tr><td><b>PreToolUse hook</b> (every single Bash call!)</td><td align="right">51.0 ms</td><td align="right"><b>10.0 ms</b></td><td align="center"><b>5.1×</b></td></tr>
 </table>
 
+</details>
+
 <sub>Reference: raw <code>git status</code> = 14.1 ms. tok startup on a PC (measured in CI): ubuntu 1 ms · macos 2 ms · windows 17 ms.</sub>
+
+## 💻 PC benchmark — Windows 11 x64
+
+> Same method as above, re-run on a desktop PC (2026-06-12): **rtk.exe 0.42.3**
+> (prebuilt Windows binary) vs **tok.exe** built from source on the spot
+> (`rustc -O tok.rs`, rustc 1.93.0). Latency = mean of 30 runs after warm-up;
+> the hook gets the same PreToolUse JSON as in `bench/latency.py`.
+
+![Latency — Windows 11 x64 PC](assets/latency-pc.svg)
+
+<details>
+<summary>data table</summary>
+
+<table>
+  <tr>
+    <th align="left">Aspect</th>
+    <th align="right">rtk 0.42.3</th>
+    <th align="right">tok</th>
+    <th align="center">tok's edge</th>
+  </tr>
+  <tr><td>startup (<code>--version</code>)</td><td align="right">21.7 ms</td><td align="right"><b>10.8 ms</b></td><td align="center">2.0×</td></tr>
+  <tr><td><b>PreToolUse hook</b></td><td align="right">37.6 ms</td><td align="right"><b>13.8 ms</b></td><td align="center"><b>2.7×</b></td></tr>
+  <tr><td>binary size</td><td align="right">8.4 MB</td><td align="right"><b>608 kB</b></td><td align="center">14.2×</td></tr>
+  <tr><td>build from source</td><td align="right">—</td><td align="right"><b>2.6 s</b> (plain rustc)</td><td align="center">✅ tok</td></tr>
+  <tr><td><code>ls C:\Windows\System32</code> (204 dirs, 4953 files; raw <code>dir</code> = 278 kB)</td><td align="right">❌ error — needs an <code>ls</code> binary on PATH</td><td align="right"><b>1.1 kB</b> (native scandir + extension grouping)</td><td align="center"><b>253× vs raw</b></td></tr>
+  <tr><td>unit tests</td><td align="right">—</td><td align="right"><b>16/16 ✅</b></td><td align="center">✅ tok</td></tr>
+</table>
+
+</details>
+
+<sub>Session dedup confirmed on Windows too: an immediate repeat of the same command returns
+a diff against the previous run instead of the full listing.</sub>
 
 ## 🤖 Subagent duel — the same task on live code
 
 Two Claude subagents (same model), identical twin Rust repositories with 2 planted bugs,
 identical list of steps. One agent ran every command through rtk, the other through tok.
 Measured from the agents' transcripts:
+
+![Subagent duel — same task on live code](assets/duel.svg)
+
+<details>
+<summary>data table</summary>
 
 <table>
   <tr>
@@ -177,7 +235,14 @@ Measured from the agents' transcripts:
   <tr><td>success (tests 4/4 + commit)</td><td align="center">✅</td><td align="center">✅</td><td align="center">🤝</td></tr>
 </table>
 
+</details>
+
 ## ♻️ Session dedup — a feature rtk doesn't have
+
+![Session dedup — repeated command](assets/dedup.svg)
+
+<details>
+<summary>data table</summary>
 
 <table>
   <tr><th align="left">Scenario (<code>find src -name "*.rs"</code>)</th><th align="right">rtk</th><th align="right">tok</th></tr>
@@ -185,6 +250,8 @@ Measured from the agents' transcripts:
   <tr><td>2nd call (nothing changed)</td><td align="right">66 tokens</td><td align="right"><b>7 tokens</b> — "unchanged since last run"</td></tr>
   <tr><td>3rd call (1 file added)</td><td align="right">66 tokens</td><td align="right"><b>~10 tokens</b> — just the diff <code>+ new_file.rs</code></td></tr>
 </table>
+
+</details>
 
 ## ✅ Measurement fairness
 

@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="600" viewBox="0 0 820 600" role="img" aria-label="Token savings — 10 real-world commands">
+<rect x="0.5" y="0.5" width="819" height="599" rx="10" fill="#0d1117" stroke="#30363d"/>
+<text x="24.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" fill="#e6edf3" font-weight="600">Token savings — 10 real-world commands</text>
+<text x="24.0" y="52.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">share of output tokens removed (higher is better) · Termux/aarch64 · whitespace metric from rtk's own tests</text>
+<rect x="670" y="22" width="11" height="11" rx="2" fill="#3fb950"/>
+<text x="687.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">tok</text>
+<rect x="730" y="22" width="11" height="11" rx="2" fill="#6e7681"/>
+<text x="747.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">rtk</text>
+<line x1="362.5" y1="62" x2="362.5" y2="550" stroke="#21262d" stroke-width="1"/>
+<text x="362.5" y="564.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">25%</text>
+<line x1="485.0" y1="62" x2="485.0" y2="550" stroke="#21262d" stroke-width="1"/>
+<text x="485.0" y="564.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">50%</text>
+<line x1="607.5" y1="62" x2="607.5" y2="550" stroke="#21262d" stroke-width="1"/>
+<text x="607.5" y="564.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">75%</text>
+<line x1="730.0" y1="62" x2="730.0" y2="550" stroke="#21262d" stroke-width="1"/>
+<text x="730.0" y="564.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">100%</text>
+<text x="228.0" y="92.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">ls (large directory)</text>
+<rect x="240" y="71" width="393.5" height="13" rx="3" fill="#6e7681"/>
+<text x="640.5" y="82.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">80.3%</text>
+<rect x="240" y="88" width="464.5" height="13" rx="3" fill="#3fb950"/>
+<text x="711.5" y="99.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">94.8%</text>
+<text x="228.0" y="136.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">find *.rs (entire src)</text>
+<rect x="240" y="115" width="184.7" height="13" rx="3" fill="#6e7681"/>
+<text x="431.7" y="126.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">37.7%</text>
+<rect x="240" y="132" width="300.4" height="13" rx="3" fill="#3fb950"/>
+<text x="547.4" y="143.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">61.3%</text>
+<text x="228.0" y="180.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">grep -rn (entire src)</text>
+<rect x="240" y="159" width="231.8" height="13" rx="3" fill="#6e7681"/>
+<text x="478.8" y="170.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">47.3%</text>
+<rect x="240" y="176" width="329.8" height="13" rx="3" fill="#3fb950"/>
+<text x="576.8" y="187.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">67.3%</text>
+<text x="228.0" y="224.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">git log -20</text>
+<rect x="240" y="203" width="269.0" height="13" rx="3" fill="#6e7681"/>
+<text x="516.0" y="214.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">54.9%</text>
+<rect x="240" y="220" width="428.3" height="13" rx="3" fill="#3fb950"/>
+<text x="675.3" y="231.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">87.4%</text>
+<text x="228.0" y="268.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">git status (dirty repo)</text>
+<rect x="240" y="247" width="404.7" height="13" rx="3" fill="#6e7681"/>
+<text x="651.7" y="258.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">82.6%</text>
+<rect x="240" y="264" width="412.1" height="13" rx="3" fill="#3fb950"/>
+<text x="659.1" y="275.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">84.1%</text>
+<text x="228.0" y="312.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">git diff (dirty repo)</text>
+<rect x="240" y="291" width="29.9" height="13" rx="3" fill="#6e7681"/>
+<text x="276.9" y="302.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">6.1%</text>
+<rect x="240" y="308" width="279.8" height="13" rx="3" fill="#3fb950"/>
+<text x="526.8" y="319.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">57.1%</text>
+<text x="228.0" y="356.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">gradle assembleDebug</text>
+<rect x="240" y="335" width="442.5" height="13" rx="3" fill="#6e7681"/>
+<text x="689.5" y="346.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">90.3%</text>
+<rect x="240" y="352" width="453.2" height="13" rx="3" fill="#3fb950"/>
+<text x="700.2" y="363.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">92.5%</text>
+<text x="228.0" y="400.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">cargo build (2 errors)</text>
+<rect x="240" y="379" width="128.4" height="13" rx="3" fill="#6e7681"/>
+<text x="375.4" y="390.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">26.2%</text>
+<rect x="240" y="396" width="169.1" height="13" rx="3" fill="#3fb950"/>
+<text x="416.1" y="407.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">34.5%</text>
+<text x="228.0" y="444.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">ffmpeg encode *</text>
+<rect x="240" y="423" width="2.0" height="13" rx="3" fill="#6e7681"/>
+<text x="249.0" y="434.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">0%</text>
+<rect x="240" y="440" width="369.9" height="13" rx="3" fill="#3fb950"/>
+<text x="617.0" y="451.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">75.5%</text>
+<text x="228.0" y="488.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">pkg list-installed *</text>
+<rect x="240" y="467" width="2.0" height="13" rx="3" fill="#6e7681"/>
+<text x="249.0" y="478.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">-0.7%</text>
+<rect x="240" y="484" width="454.7" height="13" rx="3" fill="#3fb950"/>
+<text x="701.7" y="495.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">92.8%</text>
+<line x1="16" y1="506" x2="804" y2="506" stroke="#30363d" stroke-width="1"/>
+<text x="228.0" y="532.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e6edf3" text-anchor="end" font-weight="600">TOTAL</text>
+<rect x="240" y="511" width="136.2" height="13" rx="3" fill="#6e7681"/>
+<text x="383.2" y="522.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">27.8%</text>
+<rect x="240" y="528" width="424.3" height="13" rx="3" fill="#3fb950"/>
+<text x="671.3" y="539.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3" font-weight="600">86.6%</text>
+<text x="24.0" y="586.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#8b949e">* command unknown to rtk — rtk passes it through raw; tok's generic filter compresses anything</text>
+</svg>

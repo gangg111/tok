@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="230" viewBox="0 0 820 230" role="img" aria-label="Session dedup — repeated command">
+<rect x="0.5" y="0.5" width="819" height="229" rx="10" fill="#0d1117" stroke="#30363d"/>
+<text x="24.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" fill="#e6edf3" font-weight="600">Session dedup — repeated command</text>
+<text x="24.0" y="52.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">find src -name "*.rs" called three times · tokens emitted · rtk has no such feature</text>
+<rect x="670" y="22" width="11" height="11" rx="2" fill="#3fb950"/>
+<text x="687.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">tok</text>
+<rect x="730" y="22" width="11" height="11" rx="2" fill="#6e7681"/>
+<text x="747.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">rtk</text>
+<line x1="380.0" y1="62" x2="380.0" y2="198" stroke="#21262d" stroke-width="1"/>
+<text x="380.0" y="212.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">20</text>
+<line x1="520.0" y1="62" x2="520.0" y2="198" stroke="#21262d" stroke-width="1"/>
+<text x="520.0" y="212.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">40</text>
+<line x1="660.0" y1="62" x2="660.0" y2="198" stroke="#21262d" stroke-width="1"/>
+<text x="660.0" y="212.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">60</text>
+<text x="228.0" y="92.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">1st call</text>
+<rect x="240" y="71" width="462.0" height="13" rx="3" fill="#6e7681"/>
+<text x="709.0" y="82.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">66 tokens</text>
+<rect x="240" y="88" width="287.0" height="13" rx="3" fill="#3fb950"/>
+<text x="534.0" y="99.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">41 tokens</text>
+<text x="228.0" y="136.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">2nd call (no changes)</text>
+<rect x="240" y="115" width="462.0" height="13" rx="3" fill="#6e7681"/>
+<text x="709.0" y="126.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">66 tokens</text>
+<rect x="240" y="132" width="49.0" height="13" rx="3" fill="#3fb950"/>
+<text x="296.0" y="143.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">7 — "unchanged since last run"</text>
+<text x="228.0" y="180.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">3rd call (1 file added)</text>
+<rect x="240" y="159" width="462.0" height="13" rx="3" fill="#6e7681"/>
+<text x="709.0" y="170.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">66 tokens</text>
+<rect x="240" y="176" width="70.0" height="13" rx="3" fill="#3fb950"/>
+<text x="317.0" y="187.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">~10 — one-line diff only</text>
+</svg>
