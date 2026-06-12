@@ -20,6 +20,8 @@ static LAST_CODE: Mutex<i32> = Mutex::new(0);
 const VERSION: &str = "0.2.0";
 const HEAD_KEEP: usize = 12;
 const TAIL_KEEP: usize = 18;
+const LS_GROUP_MIN: usize = 200;
+const LS_DIR_KEEP: usize = 40;
 
 fn home() -> String {
     env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap_or_else(|_| ".".into())
@@ -773,6 +775,43 @@ fn json_str_list(items: &[String]) -> String {
 
 // ── specialized handlers ─────────────────────────────────────────────
 
+fn cap_list(items: &[String], keep: usize) -> String {
+    if items.len() > keep {
+        format!("{},...+{}", items[..keep].join(","), items.len() - keep)
+    } else {
+        items.join(",")
+    }
+}
+
+fn ls_ext_groups(files: &[(String, u64)]) -> Vec<String> {
+    let mut groups: HashMap<String, (usize, u64)> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    for (name, sz) in files {
+        let ext = match name.rsplit_once('.') {
+            Some((stem, e)) if !stem.is_empty() && !e.is_empty() => e.to_ascii_lowercase(),
+            _ => String::from("noext"),
+        };
+        if !groups.contains_key(&ext) {
+            order.push(ext.clone());
+        }
+        let g = groups.entry(ext).or_insert((0, 0));
+        g.0 += 1;
+        g.1 += *sz;
+    }
+    order.sort_by(|a, b| groups[b].0.cmp(&groups[a].0).then_with(|| a.cmp(b)));
+    order
+        .iter()
+        .map(|e| {
+            let (n, sz) = groups[e];
+            if sz >= 1024 {
+                format!("{}:{}:{}", e, n, human(sz))
+            } else {
+                format!("{}:{}", e, n)
+            }
+        })
+        .collect()
+}
+
 fn h_ls(args: &[String]) -> (String, i32) {
     let show_hidden = args.iter().any(|a| matches!(a.as_str(), "-a" | "-la" | "-al" | "-lah" | "-A"));
     let mut paths: Vec<String> = args.iter().filter(|a| !a.starts_with('-')).cloned().collect();
@@ -807,7 +846,7 @@ fn h_ls(args: &[String]) -> (String, i32) {
         };
         entries.sort_by_key(|e| e.file_name());
         let mut dirs: Vec<String> = Vec::new();
-        let mut files: Vec<String> = Vec::new();
+        let mut files: Vec<(String, u64)> = Vec::new();
         let mut total: u64 = 0;
         for e in entries {
             let name = e.file_name().to_string_lossy().into_owned();
@@ -820,19 +859,25 @@ fn h_ls(args: &[String]) -> (String, i32) {
             } else {
                 let sz = e.metadata().map(|m| m.len()).unwrap_or(0);
                 total += sz;
-                if sz >= 1024 {
-                    files.push(format!("{}:{}", name, human(sz)));
-                } else {
-                    files.push(name);
-                }
+                files.push((name, sz));
             }
         }
         out.push(format!("{}: {} dirs, {} files, {}", p, dirs.len(), files.len(), human(total)));
         if !dirs.is_empty() {
-            out.push(format!("  {}", dirs.join(",")));
+            out.push(format!("  {}", cap_list(&dirs, LS_DIR_KEEP)));
         }
-        let mut line = String::from("  ");
-        for f in &files {
+        // huge dir: a per-file listing would dwarf the savings — group by extension
+        let grouped = files.len() > LS_GROUP_MIN;
+        let items: Vec<String> = if grouped {
+            ls_ext_groups(&files)
+        } else {
+            files
+                .iter()
+                .map(|(n, sz)| if *sz >= 1024 { format!("{}:{}", n, human(*sz)) } else { n.clone() })
+                .collect()
+        };
+        let mut line = String::from(if grouped { "  by ext: " } else { "  " });
+        for f in &items {
             if line.len() + f.len() > 96 {
                 out.push(line.trim_end_matches(',').to_string());
                 line = String::from("  ");
@@ -1739,6 +1784,27 @@ fn usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cap_list_truncates_with_count() {
+        let items: Vec<String> = (0..44).map(|i| format!("d{}/", i)).collect();
+        let s = cap_list(&items, 40);
+        assert!(s.ends_with("d39/,...+4"), "s = {}", s);
+        assert!(!s.contains("d40/"));
+        assert_eq!(cap_list(&items[..3], 40), "d0/,d1/,d2/");
+    }
+
+    #[test]
+    fn ls_ext_groups_collapse_huge_dirs() {
+        let mut files: Vec<(String, u64)> = (0..300).map(|i| (format!("lib{}.dll", i), 2048)).collect();
+        files.extend((0..50).map(|i| (format!("tool{}.exe", i), 512)));
+        files.push((String::from("README"), 100));
+        files.push((String::from(".hidden"), 100));
+        let g = ls_ext_groups(&files);
+        assert_eq!(g[0], "dll:300:600K");
+        assert_eq!(g[1], "exe:50:25K");
+        assert!(g.contains(&String::from("noext:2")), "g = {:?}", g);
+    }
 
     #[test]
     fn generic_dedups_similar_lines_with_counts() {

@@ -31,6 +31,8 @@ CACHE_DIR = os.environ.get("TOK_CACHE") or os.path.join(
 MAX_LINES = int(os.environ.get("TOK_MAX_LINES", "60"))
 HEAD_KEEP = 12
 TAIL_KEEP = 18
+LS_GROUP_MIN = 200
+LS_DIR_KEEP = 40
 
 # ── regexes ──────────────────────────────────────────────────────────
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][AB0]")
@@ -218,6 +220,31 @@ def rules_filter(name, raw, exit_code=0):
 
 
 # ── specialized handlers ─────────────────────────────────────────────
+def cap_list(items, keep):
+    if len(items) > keep:
+        return ",".join(items[:keep]) + ",...+%d" % (len(items) - keep)
+    return ",".join(items)
+
+
+def ls_ext_groups(files):
+    groups, order = {}, []
+    for name, sz in files:
+        stem, _, ext = name.rpartition(".")
+        ext = ext.lower() if stem and ext else "noext"
+        if ext not in groups:
+            groups[ext] = [0, 0]
+            order.append(ext)
+        groups[ext][0] += 1
+        groups[ext][1] += sz
+    order.sort(key=lambda e: (-groups[e][0], e))
+    return [
+        "%s:%d:%s" % (e, groups[e][0], human(groups[e][1]))
+        if groups[e][1] >= 1024
+        else "%s:%d" % (e, groups[e][0])
+        for e in order
+    ]
+
+
 def h_ls(args):
     """Native compact listing — no perms/owner/date noise."""
     show_hidden = any(a in ("-a", "-la", "-al", "-lah", "-A") for a in args)
@@ -249,13 +276,19 @@ def h_ls(args):
                 except OSError:
                     sz = 0
                 total += sz
-                files.append("%s:%s" % (e.name, human(sz)) if sz >= 1024 else e.name)
+                files.append((e.name, sz))
         hdr = "%s: %d dirs, %d files, %s" % (p, len(dirs), len(files), human(total))
         out.append(hdr)
         if dirs:
-            out.append("  " + ",".join(dirs))
-        line = "  "
-        for f in files:
+            out.append("  " + cap_list(dirs, LS_DIR_KEEP))
+        # huge dir: a per-file listing would dwarf the savings — group by extension
+        grouped = len(files) > LS_GROUP_MIN
+        if grouped:
+            items = ls_ext_groups(files)
+        else:
+            items = ["%s:%s" % (n, human(sz)) if sz >= 1024 else n for n, sz in files]
+        line = "  by ext: " if grouped else "  "
+        for f in items:
             if len(line) + len(f) > 96:
                 out.append(line.rstrip(","))
                 line = "  "
