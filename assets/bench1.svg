@@ -1,19 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="820" height="600" viewBox="0 0 820 600" role="img" aria-label="Token savings — 10 real-world commands">
-<rect x="0.5" y="0.5" width="819" height="599" rx="10" fill="#0d1117" stroke="#30363d"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="644" viewBox="0 0 820 644" role="img" aria-label="Token savings — 10 real-world commands">
+<rect x="0.5" y="0.5" width="819" height="643" rx="10" fill="#0d1117" stroke="#30363d"/>
 <text x="24.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" fill="#e6edf3" font-weight="600">Token savings — 10 real-world commands</text>
-<text x="24.0" y="52.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">share of output tokens removed (higher is better) · Termux/aarch64 · whitespace metric from rtk's own tests</text>
+<text x="24.0" y="52.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">share of output tokens removed (higher is better) · phone = Termux/aarch64 unless marked (PC) · whitespace metric</text>
 <rect x="670" y="22" width="11" height="11" rx="2" fill="#3fb950"/>
 <text x="687.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">tok</text>
 <rect x="730" y="22" width="11" height="11" rx="2" fill="#6e7681"/>
 <text x="747.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">rtk</text>
-<line x1="362.5" y1="62" x2="362.5" y2="550" stroke="#21262d" stroke-width="1"/>
-<text x="362.5" y="564.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">25%</text>
-<line x1="485.0" y1="62" x2="485.0" y2="550" stroke="#21262d" stroke-width="1"/>
-<text x="485.0" y="564.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">50%</text>
-<line x1="607.5" y1="62" x2="607.5" y2="550" stroke="#21262d" stroke-width="1"/>
-<text x="607.5" y="564.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">75%</text>
-<line x1="730.0" y1="62" x2="730.0" y2="550" stroke="#21262d" stroke-width="1"/>
-<text x="730.0" y="564.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">100%</text>
+<line x1="362.5" y1="62" x2="362.5" y2="594" stroke="#21262d" stroke-width="1"/>
+<text x="362.5" y="608.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">25%</text>
+<line x1="485.0" y1="62" x2="485.0" y2="594" stroke="#21262d" stroke-width="1"/>
+<text x="485.0" y="608.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">50%</text>
+<line x1="607.5" y1="62" x2="607.5" y2="594" stroke="#21262d" stroke-width="1"/>
+<text x="607.5" y="608.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">75%</text>
+<line x1="730.0" y1="62" x2="730.0" y2="594" stroke="#21262d" stroke-width="1"/>
+<text x="730.0" y="608.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">100%</text>
 <text x="228.0" y="92.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">ls (large directory)</text>
 <rect x="240" y="71" width="393.5" height="13" rx="3" fill="#6e7681"/>
 <text x="640.5" y="82.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">80.3%</text>
@@ -64,11 +64,16 @@
 <text x="249.0" y="478.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">-0.7%</text>
 <rect x="240" y="484" width="454.7" height="13" rx="3" fill="#3fb950"/>
 <text x="701.7" y="495.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">92.8%</text>
-<line x1="16" y1="506" x2="804" y2="506" stroke="#30363d" stroke-width="1"/>
-<text x="228.0" y="532.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e6edf3" text-anchor="end" font-weight="600">TOTAL</text>
-<rect x="240" y="511" width="136.2" height="13" rx="3" fill="#6e7681"/>
-<text x="383.2" y="522.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">27.8%</text>
-<rect x="240" y="528" width="424.3" height="13" rx="3" fill="#3fb950"/>
-<text x="671.3" y="539.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3" font-weight="600">86.6%</text>
-<text x="24.0" y="586.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#8b949e">* command unknown to rtk — rtk passes it through raw; tok's generic filter compresses anything</text>
+<text x="228.0" y="532.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">ls C:\Windows\System32 (PC)</text>
+<rect x="240" y="511" width="2.0" height="13" rx="3" fill="#6e7681"/>
+<text x="249.0" y="522.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">error</text>
+<rect x="240" y="528" width="489.5" height="13" rx="3" fill="#3fb950"/>
+<text x="736.5" y="539.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">99.9%</text>
+<line x1="16" y1="550" x2="804" y2="550" stroke="#30363d" stroke-width="1"/>
+<text x="228.0" y="576.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e6edf3" text-anchor="end" font-weight="600">TOTAL (phone)</text>
+<rect x="240" y="555" width="136.2" height="13" rx="3" fill="#6e7681"/>
+<text x="383.2" y="566.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">27.8%</text>
+<rect x="240" y="572" width="424.3" height="13" rx="3" fill="#3fb950"/>
+<text x="671.3" y="583.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3" font-weight="600">86.6%</text>
+<text x="24.0" y="630.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#8b949e">* unknown to rtk — passed through raw · PC row: raw dir = 26,043 tokens, tok = 17; rtk fails without an ls binary on PATH</text>
 </svg>

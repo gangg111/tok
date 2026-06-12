@@ -1,40 +1,50 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="820" height="292" viewBox="0 0 820 292" role="img" aria-label="Latency — Termux/aarch64">
-<rect x="0.5" y="0.5" width="819" height="291" rx="10" fill="#0d1117" stroke="#30363d"/>
-<text x="24.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" fill="#e6edf3" font-weight="600">Latency — Termux/aarch64</text>
-<text x="24.0" y="52.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">mean of 30 runs after warm-up · lower is better</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="380" viewBox="0 0 820 380" role="img" aria-label="Latency — phone and PC">
+<rect x="0.5" y="0.5" width="819" height="379" rx="10" fill="#0d1117" stroke="#30363d"/>
+<text x="24.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" fill="#e6edf3" font-weight="600">Latency — phone and PC</text>
+<text x="24.0" y="52.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">mean of 30 runs after warm-up · lower is better · phone = Termux/aarch64 · PC = Windows 11 x64</text>
 <rect x="670" y="22" width="11" height="11" rx="2" fill="#3fb950"/>
 <text x="687.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">tok</text>
 <rect x="730" y="22" width="11" height="11" rx="2" fill="#6e7681"/>
 <text x="747.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">rtk</text>
-<line x1="329.1" y1="62" x2="329.1" y2="242" stroke="#21262d" stroke-width="1"/>
-<text x="329.1" y="256.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">10 ms</text>
-<line x1="418.2" y1="62" x2="418.2" y2="242" stroke="#21262d" stroke-width="1"/>
-<text x="418.2" y="256.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">20 ms</text>
-<line x1="507.3" y1="62" x2="507.3" y2="242" stroke="#21262d" stroke-width="1"/>
-<text x="507.3" y="256.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">30 ms</text>
-<line x1="596.4" y1="62" x2="596.4" y2="242" stroke="#21262d" stroke-width="1"/>
-<text x="596.4" y="256.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">40 ms</text>
-<line x1="685.5" y1="62" x2="685.5" y2="242" stroke="#21262d" stroke-width="1"/>
-<text x="685.5" y="256.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">50 ms</text>
-<text x="228.0" y="92.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">startup (--version)</text>
+<line x1="329.1" y1="62" x2="329.1" y2="330" stroke="#21262d" stroke-width="1"/>
+<text x="329.1" y="344.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">10 ms</text>
+<line x1="418.2" y1="62" x2="418.2" y2="330" stroke="#21262d" stroke-width="1"/>
+<text x="418.2" y="344.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">20 ms</text>
+<line x1="507.3" y1="62" x2="507.3" y2="330" stroke="#21262d" stroke-width="1"/>
+<text x="507.3" y="344.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">30 ms</text>
+<line x1="596.4" y1="62" x2="596.4" y2="330" stroke="#21262d" stroke-width="1"/>
+<text x="596.4" y="344.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">40 ms</text>
+<line x1="685.5" y1="62" x2="685.5" y2="330" stroke="#21262d" stroke-width="1"/>
+<text x="685.5" y="344.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8b949e" text-anchor="middle">50 ms</text>
+<text x="228.0" y="92.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">startup (phone)</text>
 <rect x="240" y="71" width="98.9" height="13" rx="3" fill="#6e7681"/>
 <text x="345.9" y="82.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">11.1 ms</text>
 <rect x="240" y="88" width="82.0" height="13" rx="3" fill="#3fb950"/>
 <text x="329.0" y="99.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">9.2 ms</text>
-<text x="228.0" y="136.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">git status end-to-end</text>
+<text x="228.0" y="136.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">git status e2e (phone)</text>
 <rect x="240" y="115" width="369.7" height="13" rx="3" fill="#6e7681"/>
 <text x="616.7" y="126.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">41.5 ms</text>
 <rect x="240" y="132" width="227.2" height="13" rx="3" fill="#3fb950"/>
 <text x="474.2" y="143.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">25.5 ms</text>
-<text x="228.0" y="180.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">ls (large directory)</text>
+<text x="228.0" y="180.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">ls, large dir (phone)</text>
 <rect x="240" y="159" width="159.5" height="13" rx="3" fill="#6e7681"/>
 <text x="406.5" y="170.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">17.9 ms</text>
 <rect x="240" y="176" width="89.1" height="13" rx="3" fill="#3fb950"/>
 <text x="336.1" y="187.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">10 ms</text>
-<text x="228.0" y="224.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">PreToolUse hook</text>
+<text x="228.0" y="224.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">PreToolUse hook (phone)</text>
 <rect x="240" y="203" width="454.4" height="13" rx="3" fill="#6e7681"/>
 <text x="701.4" y="214.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">51 ms</text>
 <rect x="240" y="220" width="89.1" height="13" rx="3" fill="#3fb950"/>
 <text x="336.1" y="231.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">10 ms</text>
-<text x="24.0" y="278.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#8b949e">the PreToolUse hook fires on every single Bash call — tok is 5.1x faster there (no SQLite, no config parse)</text>
+<text x="228.0" y="268.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">startup (PC)</text>
+<rect x="240" y="247" width="193.3" height="13" rx="3" fill="#6e7681"/>
+<text x="440.3" y="258.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">21.7 ms</text>
+<rect x="240" y="264" width="96.2" height="13" rx="3" fill="#3fb950"/>
+<text x="343.2" y="275.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">10.8 ms</text>
+<text x="228.0" y="312.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8b949e" text-anchor="end">PreToolUse hook (PC)</text>
+<rect x="240" y="291" width="335.0" height="13" rx="3" fill="#6e7681"/>
+<text x="582.0" y="302.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">37.6 ms</text>
+<rect x="240" y="308" width="122.9" height="13" rx="3" fill="#3fb950"/>
+<text x="369.9" y="319.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">13.8 ms</text>
+<text x="24.0" y="366.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#8b949e">the PreToolUse hook fires on every single Bash call — tok is 5.1x faster on the phone, 2.7x on the PC</text>
 </svg>

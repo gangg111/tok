@@ -83,7 +83,7 @@ python3 bench/latency.py                        # latency benchmark
   <tr><td>Commands unknown to the tool (ffmpeg, pkg…)</td><td align="center">0% (raw)</td><td align="center"><b>76–93%</b></td><td align="center">✅ tok</td></tr>
   <tr><td>Retention of key facts</td><td align="center">9/10</td><td align="center"><b>10/10</b></td><td align="center">✅ tok</td></tr>
   <tr><td>Latency (4 paths, incl. the hook)</td><td align="center">—</td><td align="center"><b>1.2–5.1× faster</b></td><td align="center">✅ tok 4/4</td></tr>
-  <tr><td>Subagent duel on live code</td><td align="center">—</td><td align="center"><b>all metrics</b></td><td align="center">✅ tok</td></tr>
+  <tr><td>Subagent duel on live code (phone · PC)</td><td align="center">wins on PC</td><td align="center">wins on phone</td><td align="center">📱 tok · 💻 rtk</td></tr>
   <tr><td>Session dedup (repeated command)</td><td align="center">none</td><td align="center"><b>41 → 7 tokens</b></td><td align="center">✅ tok</td></tr>
   <tr><td>Binary size</td><td align="center">7.0 MB</td><td align="center"><b>836 kB</b></td><td align="center">✅ tok (8.4×)</td></tr>
   <tr><td>Build from source</td><td align="center">2 m 04 s (cargo)</td><td align="center"><b>~2 s</b> (plain rustc)</td><td align="center">✅ tok (~60×)</td></tr>
@@ -120,10 +120,12 @@ python3 bench/latency.py                        # latency benchmark
   <tr><td>cargo build (2 errors)</td><td align="right">84</td><td align="right">62</td><td align="right">26.2%</td><td align="right"><b>55</b></td><td align="right"><b>34.5%</b></td></tr>
   <tr><td>ffmpeg encode <i>(unknown to rtk)</i></td><td align="right">220</td><td align="right">220</td><td align="right">0.0%</td><td align="right"><b>54</b></td><td align="right"><b>75.5%</b></td></tr>
   <tr><td>pkg list-installed <i>(unknown to rtk)</i></td><td align="right">1941</td><td align="right">1955</td><td align="right">−0.7%</td><td align="right"><b>139</b></td><td align="right"><b>92.8%</b></td></tr>
-  <tr><td><b>TOTAL</b></td><td align="right"><b>4325</b></td><td align="right"><b>3123</b></td><td align="right"><b>27.8%</b></td><td align="right"><b>578</b></td><td align="right"><b>86.6%</b></td></tr>
+  <tr><td>ls C:\Windows\System32 <i>(PC, Windows 11)</i></td><td align="right">26043</td><td align="right">—</td><td align="right">error*²</td><td align="right"><b>17</b></td><td align="right"><b>99.9%</b></td></tr>
+  <tr><td><b>TOTAL (phone)</b></td><td align="right"><b>4325</b></td><td align="right"><b>3123</b></td><td align="right"><b>27.8%</b></td><td align="right"><b>578</b></td><td align="right"><b>86.6%</b></td></tr>
 </table>
 
-<sub>\* rtk lost file names in this case (hook_cmd.rs, toml_filter.rs) — information loss.</sub>
+<sub>\* rtk lost file names in this case (hook_cmd.rs, toml_filter.rs) — information loss.
+\*² rtk resolves <code>ls</code> via PATH and fails on Windows, where no ls binary exists; tok lists natively via scandir.</sub>
 
 </details>
 
@@ -153,7 +155,7 @@ python3 bench/latency.py                        # latency benchmark
 
 </details>
 
-## ⚡ Latency (mean of 30 runs after warm-up, Termux/aarch64)
+## ⚡ Latency (mean of 30 runs after warm-up; phone and PC)
 
 ![Latency — Termux/aarch64](assets/latency.svg)
 
@@ -201,6 +203,8 @@ python3 bench/latency.py                        # latency benchmark
   <tr><td>binary size</td><td align="right">8.4 MB</td><td align="right"><b>608 kB</b></td><td align="center">14.2×</td></tr>
   <tr><td>build from source</td><td align="right">—</td><td align="right"><b>2.6 s</b> (plain rustc)</td><td align="center">✅ tok</td></tr>
   <tr><td><code>ls C:\Windows\System32</code> (204 dirs, 4953 files; raw <code>dir</code> = 278 kB)</td><td align="right">❌ error — needs an <code>ls</code> binary on PATH</td><td align="right"><b>1.1 kB</b> (native scandir + extension grouping)</td><td align="center"><b>253× vs raw</b></td></tr>
+  <tr><td>subagent duel (twin repos, 2 planted bugs)</td><td align="right"><b>wins all traffic metrics</b></td><td align="right">4/4 + commit, but more traffic</td><td align="center">✅ rtk</td></tr>
+  <tr><td>session dedup (<code>ls</code>, 30-file dir, 3 calls)</td><td align="right">62 tokens each call</td><td align="right"><b>14 → 8 → 14</b></td><td align="center">✅ tok</td></tr>
   <tr><td>unit tests</td><td align="right">—</td><td align="right"><b>16/16 ✅</b></td><td align="center">✅ tok</td></tr>
 </table>
 
@@ -213,7 +217,14 @@ a diff against the previous run instead of the full listing.</sub>
 
 Two Claude subagents (same model), identical twin Rust repositories with 2 planted bugs,
 identical list of steps. One agent ran every command through rtk, the other through tok.
-Measured from the agents' transcripts:
+Measured from the agents' transcripts (`bench/analyze_duel.py`). Run twice: on the
+phone (Termux) and, with fresh twin arenas, on the PC (Windows 11, 2026-06-12).
+
+**Honest split**: on the phone tok won every metric; on the PC **rtk won every
+metric** — rtk's cargo filter aggregates the final tally (`4 passed (3 suites)`)
+while tok left three per-suite `test result:` lines, so the tok agent re-ran
+`cargo test` once more to be sure (1 extra call, +15% wall-time). All four lanes
+finished 4/4 tests PASS + commit.
 
 ![Subagent duel — same task on live code](assets/duel.svg)
 
@@ -222,7 +233,7 @@ Measured from the agents' transcripts:
 
 <table>
   <tr>
-    <th align="left">Metric (Bash tool results)</th>
+    <th align="left">Metric — phone (Bash tool results)</th>
     <th align="right">agent-rtk</th>
     <th align="right">agent-tok</th>
     <th align="center">tok's edge</th>
@@ -235,6 +246,25 @@ Measured from the agents' transcripts:
   <tr><td>success (tests 4/4 + commit)</td><td align="center">✅</td><td align="center">✅</td><td align="center">🤝</td></tr>
 </table>
 
+<table>
+  <tr>
+    <th align="left">Metric — PC (PowerShell tool results)</th>
+    <th align="right">agent-rtk</th>
+    <th align="right">agent-tok</th>
+    <th align="center">rtk's edge</th>
+  </tr>
+  <tr><td>result bytes</td><td align="right"><b>1699</b></td><td align="right">1891</td><td align="center">10.2%</td></tr>
+  <tr><td>tokens (whitespace)</td><td align="right"><b>208</b></td><td align="right">221</td><td align="center">5.9%</td></tr>
+  <tr><td>tokens (est. BPE)</td><td align="right"><b>642</b></td><td align="right">699</td><td align="center">8.2%</td></tr>
+  <tr><td>agent output tokens</td><td align="right"><b>2669</b></td><td align="right">3405</td><td align="center">21.6%</td></tr>
+  <tr><td>task time</td><td align="right"><b>98.3 s</b></td><td align="right">113.5 s</td><td align="center">13.4%</td></tr>
+  <tr><td>success (tests 4/4 + commit)</td><td align="center">✅</td><td align="center">✅</td><td align="center">🤝</td></tr>
+</table>
+
+<sub>The PC duel used the PowerShell tool — this machine hooks the Bash tool globally
+through rtk (<code>rtk hook claude</code>), which would have rewritten both lanes' commands.
+Twin arenas were byte-identical (same initial commit hash), same model, same step list.</sub>
+
 </details>
 
 ## ♻️ Session dedup — a feature rtk doesn't have
@@ -245,11 +275,21 @@ Measured from the agents' transcripts:
 <summary>data table</summary>
 
 <table>
-  <tr><th align="left">Scenario (<code>find src -name "*.rs"</code>)</th><th align="right">rtk</th><th align="right">tok</th></tr>
+  <tr><th align="left">Scenario — phone (<code>find src -name "*.rs"</code>)</th><th align="right">rtk</th><th align="right">tok</th></tr>
   <tr><td>1st call</td><td align="right">66 tokens</td><td align="right">41 tokens</td></tr>
   <tr><td>2nd call (nothing changed)</td><td align="right">66 tokens</td><td align="right"><b>7 tokens</b> — "unchanged since last run"</td></tr>
   <tr><td>3rd call (1 file added)</td><td align="right">66 tokens</td><td align="right"><b>~10 tokens</b> — just the diff <code>+ new_file.rs</code></td></tr>
 </table>
+
+<table>
+  <tr><th align="left">Scenario — PC (<code>ls</code> on a 30-file directory)</th><th align="right">rtk</th><th align="right">tok</th></tr>
+  <tr><td>1st call</td><td align="right">62 tokens</td><td align="right"><b>14 tokens</b></td></tr>
+  <tr><td>2nd call (nothing changed)</td><td align="right">62 tokens</td><td align="right"><b>8 tokens</b> — "unchanged since last run"</td></tr>
+  <tr><td>3rd call (1 file added)</td><td align="right">62 tokens</td><td align="right"><b>14 tokens</b> — full re-list (re-wrapped ls lines no longer make a short diff)</td></tr>
+</table>
+
+<sub>The PC scenario uses <code>ls</code> because Windows resolves <code>find</code> to System32's
+incompatible find.exe before PATH.</sub>
 
 </details>
 
@@ -259,7 +299,10 @@ Measured from the agents' transcripts:
 - rtk got its full set of TOML filters and the gradle invocation variant that works for it,
 - filter benchmarks measured with `TOK_NO_DEDUP=1` (session dedup measured separately),
 - the first round of the subagent duel was **invalidated** (unequal arenas due to a setup fault) and re-run on identical ones,
-- the only tie: RSS memory (~12 MB for both — Android baseline); rtk has numerically more specialized filters (100+), yet loses even on its own fixtures.
+- the only tie: RSS memory (~12 MB for both — Android baseline); rtk has numerically more specialized filters (100+), yet loses even on its own fixtures,
+- the PC duel (Windows 11, 2026-06-12) used the PowerShell tool, because this machine hooks the Bash tool globally through rtk — the hook would have rewritten both lanes' commands; arenas were byte-identical twins (same initial commit hash),
+- the PC duel result — **rtk winning every traffic metric** — is reported as-is; cause analysis: tok's per-suite `cargo test` output pushed its agent into one extra verification run,
+- the PC dedup scenario uses `ls` instead of `find` (Windows resolves `find` to System32's incompatible find.exe before PATH); fixture replay (Benchmark 2) has no PC rerun — neither tool can spawn `.bat` shims, an equal limitation.
 
 
 ## License

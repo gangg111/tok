@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="820" height="362" viewBox="0 0 820 362" role="img" aria-label="Token savings — rtk's own test fixtures">
-<rect x="0.5" y="0.5" width="819" height="361" rx="10" fill="#0d1117" stroke="#30363d"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="380" viewBox="0 0 820 380" role="img" aria-label="Token savings — rtk's own test fixtures">
+<rect x="0.5" y="0.5" width="819" height="379" rx="10" fill="#0d1117" stroke="#30363d"/>
 <text x="24.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" fill="#e6edf3" font-weight="600">Token savings — rtk's own test fixtures</text>
-<text x="24.0" y="52.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">end-to-end replay of fixtures from the rtk repo (gradle / maven / glab — its flagship modules) · higher is better</text>
+<text x="24.0" y="52.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">end-to-end replay of fixtures from the rtk repo (gradle / maven / glab) · higher is better · phone (Termux)</text>
 <rect x="670" y="22" width="11" height="11" rx="2" fill="#3fb950"/>
 <text x="687.0" y="32.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">tok</text>
 <rect x="730" y="22" width="11" height="11" rx="2" fill="#6e7681"/>
@@ -40,9 +40,10 @@
 <rect x="240" y="264" width="235.2" height="13" rx="3" fill="#3fb950"/>
 <text x="482.2" y="275.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3">48%</text>
 <line x1="16" y1="286" x2="804" y2="286" stroke="#30363d" stroke-width="1"/>
-<text x="228.0" y="312.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e6edf3" text-anchor="end" font-weight="600">TOTAL</text>
+<text x="228.0" y="312.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e6edf3" text-anchor="end" font-weight="600">TOTAL (phone)</text>
 <rect x="240" y="291" width="269.0" height="13" rx="3" fill="#6e7681"/>
 <text x="516.0" y="302.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8b949e">54.9%</text>
 <rect x="240" y="308" width="320.0" height="13" rx="3" fill="#3fb950"/>
 <text x="567.0" y="319.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#e6edf3" font-weight="600">65.3%</text>
+<text x="24.0" y="366.0" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#8b949e">no PC rerun: the replay needs shell shims and on Windows neither rtk nor tok can spawn .bat shims (equal limitation)</text>
 </svg>
