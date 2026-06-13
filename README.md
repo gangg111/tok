@@ -24,6 +24,50 @@ cp tok.py ~/.local/bin/tok && chmod +x ~/.local/bin/tok
 tok init -g
 ```
 
+## Hook setup per agent
+
+tok plugs into each agent's "before a shell command runs" hook. Point that hook
+at `tok hook <agent>`, matched to the shell/Bash tool — tok rewrites simple
+commands to `tok <cmd>` and passes everything else (chains, `cd`, `ssh`…)
+through untouched.
+
+| Agent | Config file | Hook command |
+|---|---|---|
+| Claude Code (CLI, desktop) | `~/.claude/settings.json` — or just run `tok init -g` | `tok hook claude` |
+| OpenAI Codex (CLI, desktop, IDE) | `~/.codex/config.toml` | `tok hook codex` |
+| Gemini CLI | `~/.gemini/settings.json` | `tok hook gemini` |
+| GitHub Copilot (VS Code + CLI) | Copilot hook settings | `tok hook copilot` |
+| Cursor | `~/.cursor/` agent hooks | `tok hook cursor` |
+
+**Claude Code** — automatic:
+
+```sh
+tok init -g          # writes the PreToolUse(Bash) → "tok hook claude" entry
+```
+
+**OpenAI Codex** — add to `~/.codex/config.toml` (user-level so it fires across
+CLI, desktop and IDE; repo-local `.codex` hooks aren't reliable in interactive
+sessions):
+
+```toml
+[features]
+hooks = true
+
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "tok hook codex"
+```
+
+**Gemini CLI / Copilot / Cursor** — each speaks its own contract, already
+implemented in tok. Register `tok hook gemini` / `tok hook copilot` /
+`tok hook cursor` as that agent's pre-shell (Gemini: `run_shell_command`;
+Copilot/Cursor: Bash) hook, following the agent's own hook docs for the exact
+config syntax. The hook reads the tool JSON on stdin and replies with the
+rewrite — no extra setup beyond pointing the agent at the command.
+
 ## Usage
 
 ```
@@ -54,32 +98,8 @@ tok hook claude|codex|gemini|copilot|cursor   hook entrypoints (JSON on stdin)
   Linux, macOS, Windows; Python fallback when there's no compiler.
 - **Many agents**: PreToolUse rewrite hooks for Claude Code, OpenAI Codex
   (CLI, desktop and IDE — one `~/.codex` config layer covers all three),
-  Gemini CLI, GitHub Copilot (VS Code + CLI) and Cursor.
-
-### Wiring tok into OpenAI Codex
-
-Codex ships a Claude-style PreToolUse hook contract, so tok's `hook codex`
-entrypoint reuses the exact same logic. Enable it at the **user level**
-(`~/.codex/config.toml`) so it fires across the CLI, desktop app and IDE
-extension regardless of project trust — repo-local `.codex/config.toml` hooks
-are not reliably honored in interactive sessions:
-
-```toml
-# ~/.codex/config.toml
-[features]
-hooks = true
-
-[[hooks.PreToolUse]]
-matcher = "^Bash$"
-
-[[hooks.PreToolUse.hooks]]
-type = "command"
-command = "tok hook codex"
-```
-
-The hook only rewrites simple shell commands (`git status` → `tok git status`);
-chains with `&&`/`|`/`;` and the never-rewrite list (cd, ssh…) pass through
-untouched, identical to the Claude wiring.
+  Gemini CLI, GitHub Copilot (VS Code + CLI) and Cursor — see
+  [Hook setup per agent](#hook-setup-per-agent).
 
 ## Tests
 
