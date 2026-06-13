@@ -1701,6 +1701,19 @@ fn hook_claude() -> i32 {
     0
 }
 
+/// OpenAI Codex hook (CLI, desktop and IDE — all share the ~/.codex config
+/// layer, so one entrypoint covers every surface). Codex ships a Claude-style
+/// PreToolUse contract: stdin carries `tool_name` + `tool_input.command`
+/// (alongside a richer envelope — turn_id, cwd, tool_use_id… — that we ignore),
+/// and the allow+rewrite reply is the same
+/// `hookSpecificOutput.permissionDecision` / `updatedInput` shape. The contract
+/// is byte-identical to Claude's, so we reuse that logic verbatim rather than
+/// duplicate it — if Codex ever diverges, fork here. The config-side matcher
+/// (`^Bash$`) gates which tools reach us, exactly like Claude's matcher.
+fn hook_codex() -> i32 {
+    hook_claude()
+}
+
 /// Gemini CLI BeforeTool hook (tool_name == "run_shell_command").
 fn hook_gemini() -> i32 {
     let input = read_stdin_trimmed();
@@ -1842,7 +1855,7 @@ fn usage() {
     println!("  tok full                  print full raw output of the last run");
     println!("  tok gain                  cumulative token savings");
     println!("  tok init [-g]             install Claude Code hook (delegates to tok.py)");
-    println!("  tok hook claude           hook entrypoint (JSON on stdin)");
+    println!("  tok hook claude|codex|gemini|copilot|cursor   hook entrypoint (JSON on stdin)");
 }
 
 #[cfg(test)]
@@ -2014,6 +2027,19 @@ mod tests {
     }
 
     #[test]
+    fn codex_envelope_rewrites_through_extra_fields() {
+        // Codex sends a richer PreToolUse envelope than Claude (turn_id, cwd,
+        // tool_use_id…). The command must still be located at tool_input.command
+        // and rewritten cleanly — tool_use_id must not be mistaken for tool_input.
+        let input = r#"{"session_id":"s","cwd":"/repo","hook_event_name":"PreToolUse","turn_id":"t1","tool_name":"Bash","tool_use_id":"call_42","tool_input":{"command":"cargo build"}}"#;
+        let (ti, q, cmd) = claude_style_command(input).unwrap();
+        assert_eq!(cmd, "cargo build");
+        assert!(hook_should_rewrite(&cmd));
+        let updated = format!("{}tok {}", &ti[..q + 1], &ti[q + 1..]);
+        assert!(updated.contains(r#""command":"tok cargo build""#));
+    }
+
+    #[test]
     fn copilot_cli_toolargs_decoding() {
         let input = r#"{"toolName":"bash","toolArgs":"{\"command\":\"git status\",\"timeout\":5}"}"#;
         let args_obj = extract_string_field(input, "\"toolArgs\"").unwrap();
@@ -2084,6 +2110,7 @@ fn main() {
             Some("gemini") => hook_gemini(),
             Some("cursor") => hook_cursor(),
             Some("copilot") => hook_copilot(),
+            Some("codex") => hook_codex(),
             _ => hook_claude(),
         },
         Some("init") => {

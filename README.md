@@ -34,7 +34,7 @@ tok pipe [name]            filter stdin (gradle|maven|pytest|npm|pip|ffmpeg|citr
 tok full [n|list]          full raw output of the last (or n-th last) run
 tok gain                   cumulative token savings
 tok init [-g]              install the Claude Code PreToolUse rewrite hook
-tok hook claude|gemini|copilot|cursor   hook entrypoints (JSON on stdin)
+tok hook claude|codex|gemini|copilot|cursor   hook entrypoints (JSON on stdin)
 ```
 
 ## How it beats rtk
@@ -52,6 +52,34 @@ tok hook claude|gemini|copilot|cursor   hook entrypoints (JSON on stdin)
   rtk (no SQLite, no config parse at startup). Binary is 836 kB vs 7 MB.
 - **Runs everywhere**: Termux/bionic (where official rtk binaries don't load),
   Linux, macOS, Windows; Python fallback when there's no compiler.
+- **Many agents**: PreToolUse rewrite hooks for Claude Code, OpenAI Codex
+  (CLI, desktop and IDE — one `~/.codex` config layer covers all three),
+  Gemini CLI, GitHub Copilot (VS Code + CLI) and Cursor.
+
+### Wiring tok into OpenAI Codex
+
+Codex ships a Claude-style PreToolUse hook contract, so tok's `hook codex`
+entrypoint reuses the exact same logic. Enable it at the **user level**
+(`~/.codex/config.toml`) so it fires across the CLI, desktop app and IDE
+extension regardless of project trust — repo-local `.codex/config.toml` hooks
+are not reliably honored in interactive sessions:
+
+```toml
+# ~/.codex/config.toml
+[features]
+hooks = true
+
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "tok hook codex"
+```
+
+The hook only rewrites simple shell commands (`git status` → `tok git status`);
+chains with `&&`/`|`/`;` and the never-rewrite list (cd, ssh…) pass through
+untouched, identical to the Claude wiring.
 
 ## Tests
 

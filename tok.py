@@ -15,7 +15,7 @@ Usage:
   tok full                     print full raw output of the last run
   tok gain                     show cumulative token savings
   tok init [-g] [--settings P] install Claude Code PreToolUse rewrite hook
-  tok hook claude              hook entrypoint (reads JSON on stdin)
+  tok hook claude|codex        hook entrypoint (reads JSON on stdin)
 """
 import io
 import json
@@ -718,6 +718,10 @@ def main():
     if argv[0] == "gain":
         return gain()
     if argv[0] == "hook":
+        # claude and codex share a byte-identical PreToolUse contract
+        # (tool_input.command in, hookSpecificOutput.updatedInput out), so the
+        # Claude handler serves both. The richer agents (gemini/cursor/copilot)
+        # live only in the Rust binary — this fallback covers the common case.
         return hook_claude()
     if argv[0] == "init":
         return init_hook(argv[1:])
