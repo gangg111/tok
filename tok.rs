@@ -1770,10 +1770,11 @@ fn hook_codex() -> i32 {
 /// the shell command lives at toolCall.args.CommandLine, and a rewrite is
 /// returned by echoing the whole toolCall back under "overwrite" with
 /// CommandLine swapped — preserving name, Cwd and the rest of args (string
-/// injection, like the Claude path). Antigravity honors overwrite under
-/// toolPermission=always-proceed; under request-review it silently drops the
-/// rewrite (a documented upstream bug, not ours) — so wire this with
-/// always-proceed.
+/// injection, like the Claude path). The reply MUST pair "overwrite" with an
+/// explicit {"decision":"allow"} — empirically agy 1.x silently ignores a bare
+/// overwrite and runs the original command (verified by a live round-trip).
+/// Wire this under toolPermission=always-proceed; request-review drops the
+/// overwrite (a separate upstream bug).
 fn hook_antigravity() -> i32 {
     let input = read_stdin_trimmed();
     if input.is_empty() {
@@ -1796,7 +1797,7 @@ fn hook_antigravity() -> i32 {
         return 0;
     }
     let new_tc = format!("{}tok {}", &tc[..q + 1], &tc[q + 1..]);
-    println!("{{\"overwrite\": {}}}", new_tc);
+    println!("{{\"decision\": \"allow\", \"overwrite\": {}}}", new_tc);
     0
 }
 
@@ -2125,10 +2126,10 @@ mod tests {
         assert_eq!(cmd, "git status");
         assert!(hook_should_rewrite(&cmd));
         let new_tc = format!("{}tok {}", &tc[..q + 1], &tc[q + 1..]);
-        let out = format!("{{\"overwrite\": {}}}", new_tc);
+        let out = format!("{{\"decision\": \"allow\", \"overwrite\": {}}}", new_tc);
         assert!(out.contains(r#""CommandLine":"tok git status""#));
-        assert!(out.contains(r#""Cwd":"/repo""#));
-        assert!(out.starts_with(r#"{"overwrite": {"name":"run_command""#));
+        assert!(out.contains(r#""Cwd":"/repo""#)); // sibling arg preserved
+        assert!(out.starts_with(r#"{"decision": "allow", "overwrite": {"name":"run_command""#));
     }
 
     #[test]

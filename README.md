@@ -64,10 +64,11 @@ command = "tok hook codex"
 
 **Google Antigravity** (agy CLI + desktop) — add to `~/.gemini/config/hooks.json`
 (global, so both the CLI and the desktop pick it up). Antigravity nests the
-command at `toolCall.args.CommandLine` and accepts a rewrite via an `overwrite`
-reply; tok's `hook antigravity` speaks exactly that. Needs
-`toolPermission: always-proceed` (under `request-review` Antigravity drops the
-overwrite — an upstream bug):
+command at `toolCall.args.CommandLine` and accepts a rewrite via a
+`{"decision":"allow","overwrite":{…}}` reply (a bare `overwrite` is silently
+ignored — verified by a live round-trip); tok's `hook antigravity` emits exactly
+that. Needs `toolPermission: always-proceed` (under `request-review` Antigravity
+drops the overwrite — an upstream bug):
 
 ```json
 {

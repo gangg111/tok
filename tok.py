@@ -678,7 +678,8 @@ def hook_antigravity():
     new_args["CommandLine"] = "tok " + cmd
     new_tc = dict(tc)
     new_tc["args"] = new_args
-    print(json.dumps({"overwrite": new_tc}))
+    # overwrite is applied only when paired with an explicit allow decision
+    print(json.dumps({"decision": "allow", "overwrite": new_tc}))
     return 0
 
 
