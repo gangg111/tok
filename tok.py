@@ -15,7 +15,7 @@ Usage:
   tok full                     print full raw output of the last run
   tok gain                     show cumulative token savings
   tok init [-g] [--settings P] install Claude Code PreToolUse rewrite hook
-  tok hook claude|codex        hook entrypoint (reads JSON on stdin)
+  tok hook claude|codex|antigravity   hook entrypoint (reads JSON on stdin)
 """
 import io
 import json
@@ -651,6 +651,37 @@ def hook_claude():
     return 0
 
 
+def hook_antigravity():
+    # Antigravity (agy CLI + desktop): command at toolCall.args.CommandLine;
+    # rewrite by echoing the whole toolCall back under "overwrite" with
+    # CommandLine swapped, preserving name/Cwd/other args. Honored under
+    # toolPermission=always-proceed (dropped under request-review upstream).
+    data = sys.stdin.read().strip()
+    if not data:
+        return 0
+    try:
+        v = json.loads(data)
+    except ValueError:
+        return 0
+    tc = v.get("toolCall") or {}
+    args = tc.get("args") or {}
+    cmd = args.get("CommandLine", "")
+    if not cmd or UNSAFE_RE.search(cmd):
+        return 0
+    first = os.path.basename(cmd.split()[0])
+    rewrite_all = os.environ.get("TOK_REWRITE_ALL") == "1"
+    if first in ("tok", "rtk", "cd", "export", "source", "vim", "nano", "ssh"):
+        return 0
+    if not rewrite_all and first not in REWRITABLE and not cmd.split()[0].endswith("gradlew"):
+        return 0
+    new_args = dict(args)
+    new_args["CommandLine"] = "tok " + cmd
+    new_tc = dict(tc)
+    new_tc["args"] = new_args
+    print(json.dumps({"overwrite": new_tc}))
+    return 0
+
+
 def init_hook(argv):
     path = None
     if "--settings" in argv:
@@ -718,6 +749,9 @@ def main():
     if argv[0] == "gain":
         return gain()
     if argv[0] == "hook":
+        variant = argv[1] if len(argv) > 1 else "claude"
+        if variant in ("antigravity", "agy"):
+            return hook_antigravity()
         # claude and codex share a byte-identical PreToolUse contract
         # (tool_input.command in, hookSpecificOutput.updatedInput out), so the
         # Claude handler serves both. The richer agents (gemini/cursor/copilot)

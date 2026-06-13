@@ -35,6 +35,7 @@ through untouched.
 |---|---|---|
 | Claude Code (CLI, desktop) | `~/.claude/settings.json` — or just run `tok init -g` | `tok hook claude` |
 | OpenAI Codex (CLI, desktop, IDE) | `~/.codex/config.toml` | `tok hook codex` |
+| Google Antigravity (agy CLI + desktop) | `~/.gemini/config/hooks.json` | `tok hook antigravity` |
 | Gemini CLI | `~/.gemini/settings.json` | `tok hook gemini` |
 | GitHub Copilot (VS Code + CLI) | Copilot hook settings | `tok hook copilot` |
 | Cursor | `~/.cursor/` agent hooks | `tok hook cursor` |
@@ -59,6 +60,28 @@ matcher = "^Bash$"
 [[hooks.PreToolUse.hooks]]
 type = "command"
 command = "tok hook codex"
+```
+
+**Google Antigravity** (agy CLI + desktop) — add to `~/.gemini/config/hooks.json`
+(global, so both the CLI and the desktop pick it up). Antigravity nests the
+command at `toolCall.args.CommandLine` and accepts a rewrite via an `overwrite`
+reply; tok's `hook antigravity` speaks exactly that. Needs
+`toolPermission: always-proceed` (under `request-review` Antigravity drops the
+overwrite — an upstream bug):
+
+```json
+{
+  "tok-token-diet": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          { "type": "command", "command": "tok hook antigravity" }
+        ]
+      }
+    ]
+  }
+}
 ```
 
 **Gemini CLI / Copilot / Cursor** — each speaks its own contract, already
@@ -98,8 +121,8 @@ tok hook claude|codex|gemini|copilot|cursor   hook entrypoints (JSON on stdin)
   Linux, macOS, Windows; Python fallback when there's no compiler.
 - **Many agents**: PreToolUse rewrite hooks for Claude Code, OpenAI Codex
   (CLI, desktop and IDE — one `~/.codex` config layer covers all three),
-  Gemini CLI, GitHub Copilot (VS Code + CLI) and Cursor — see
-  [Hook setup per agent](#hook-setup-per-agent).
+  Google Antigravity (agy CLI + desktop), Gemini CLI, GitHub Copilot
+  (VS Code + CLI) and Cursor — see [Hook setup per agent](#hook-setup-per-agent).
 
 ## Tests
 

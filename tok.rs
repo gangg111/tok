@@ -1600,6 +1600,57 @@ fn command_value_quote(obj: &str) -> Option<usize> {
     }
 }
 
+/// Brace-matched object that follows `key` (e.g. "\"toolCall\""). Generic
+/// sibling of tool_input_range for envelopes that nest the command elsewhere.
+fn object_after_key(j: &str, key: &str) -> Option<(usize, usize)> {
+    let k = j.find(key)?;
+    let open = j[k..].find('{')? + k;
+    let b = j.as_bytes();
+    let (mut depth, mut in_str, mut esc) = (0usize, false, false);
+    for (i, &c) in b.iter().enumerate().skip(open) {
+        if in_str {
+            if esc {
+                esc = false;
+            } else if c == b'\\' {
+                esc = true;
+            } else if c == b'"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match c {
+            b'"' => in_str = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((open, i + 1));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Opening-quote position of the string value for `key` inside `obj`. Generic
+/// sibling of command_value_quote (which is hardwired to "command").
+fn quoted_value_pos(obj: &str, key: &str) -> Option<usize> {
+    let k = obj.find(key)?;
+    let after = &obj[k + key.len()..];
+    let colon = after.find(':')?;
+    let mut idx = k + key.len() + colon + 1;
+    let b = obj.as_bytes();
+    while idx < b.len() && (b[idx] as char).is_whitespace() {
+        idx += 1;
+    }
+    if idx < b.len() && b[idx] == b'"' {
+        Some(idx)
+    } else {
+        None
+    }
+}
+
 fn parse_json_string(s: &str) -> Option<String> {
     // s starts at the opening quote
     let mut it = s.chars();
@@ -1712,6 +1763,41 @@ fn hook_claude() -> i32 {
 /// (`^Bash$`) gates which tools reach us, exactly like Claude's matcher.
 fn hook_codex() -> i32 {
     hook_claude()
+}
+
+/// Google Antigravity hook (agy CLI + desktop; one global
+/// ~/.gemini/config/hooks.json covers both). Different envelope from Claude:
+/// the shell command lives at toolCall.args.CommandLine, and a rewrite is
+/// returned by echoing the whole toolCall back under "overwrite" with
+/// CommandLine swapped — preserving name, Cwd and the rest of args (string
+/// injection, like the Claude path). Antigravity honors overwrite under
+/// toolPermission=always-proceed; under request-review it silently drops the
+/// rewrite (a documented upstream bug, not ours) — so wire this with
+/// always-proceed.
+fn hook_antigravity() -> i32 {
+    let input = read_stdin_trimmed();
+    if input.is_empty() {
+        return 0;
+    }
+    let (s, e) = match object_after_key(&input, "\"toolCall\"") {
+        Some(r) => r,
+        None => return 0,
+    };
+    let tc = &input[s..e];
+    let q = match quoted_value_pos(tc, "\"CommandLine\"") {
+        Some(q) => q,
+        None => return 0,
+    };
+    let cmd = match parse_json_string(&tc[q..]) {
+        Some(c) => c,
+        None => return 0,
+    };
+    if !hook_should_rewrite(&cmd) {
+        return 0;
+    }
+    let new_tc = format!("{}tok {}", &tc[..q + 1], &tc[q + 1..]);
+    println!("{{\"overwrite\": {}}}", new_tc);
+    0
 }
 
 /// Gemini CLI BeforeTool hook (tool_name == "run_shell_command").
@@ -1855,7 +1941,7 @@ fn usage() {
     println!("  tok full                  print full raw output of the last run");
     println!("  tok gain                  cumulative token savings");
     println!("  tok init [-g]             install Claude Code hook (delegates to tok.py)");
-    println!("  tok hook claude|codex|gemini|copilot|cursor   hook entrypoint (JSON on stdin)");
+    println!("  tok hook claude|codex|antigravity|gemini|copilot|cursor   hook entrypoint (JSON on stdin)");
 }
 
 #[cfg(test)]
@@ -2027,6 +2113,25 @@ mod tests {
     }
 
     #[test]
+    fn antigravity_overwrites_commandline_preserving_args() {
+        // Antigravity's envelope nests the command at toolCall.args.CommandLine
+        // and expects the whole toolCall echoed back under "overwrite". Cwd and
+        // any sibling args must survive the rewrite untouched.
+        let input = r#"{"toolCall":{"name":"run_command","args":{"CommandLine":"git status","Cwd":"/repo"}},"workspacePaths":[],"transcriptPath":""}"#;
+        let (s, e) = object_after_key(input, "\"toolCall\"").unwrap();
+        let tc = &input[s..e];
+        let q = quoted_value_pos(tc, "\"CommandLine\"").unwrap();
+        let cmd = parse_json_string(&tc[q..]).unwrap();
+        assert_eq!(cmd, "git status");
+        assert!(hook_should_rewrite(&cmd));
+        let new_tc = format!("{}tok {}", &tc[..q + 1], &tc[q + 1..]);
+        let out = format!("{{\"overwrite\": {}}}", new_tc);
+        assert!(out.contains(r#""CommandLine":"tok git status""#));
+        assert!(out.contains(r#""Cwd":"/repo""#));
+        assert!(out.starts_with(r#"{"overwrite": {"name":"run_command""#));
+    }
+
+    #[test]
     fn codex_envelope_rewrites_through_extra_fields() {
         // Codex sends a richer PreToolUse envelope than Claude (turn_id, cwd,
         // tool_use_id…). The command must still be located at tool_input.command
@@ -2111,6 +2216,7 @@ fn main() {
             Some("cursor") => hook_cursor(),
             Some("copilot") => hook_copilot(),
             Some("codex") => hook_codex(),
+            Some("antigravity") | Some("agy") => hook_antigravity(),
             _ => hook_claude(),
         },
         Some("init") => {
