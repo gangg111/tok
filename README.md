@@ -92,6 +92,24 @@ Copilot/Cursor: Bash) hook, following the agent's own hook docs for the exact
 config syntax. The hook reads the tool JSON on stdin and replies with the
 rewrite — no extra setup beyond pointing the agent at the command.
 
+## Make your agent report savings
+
+`tok gain` prints a per-session and an all-time total. For an agent to answer
+"how many tokens did you save this session?" reflexively, it needs that mapping
+in its context. `tok init` does this for Claude Code automatically — alongside
+the hook it appends a short instruction to `CLAUDE.md` (global with `-g`, else
+the project file), idempotently (a `<!-- tok:gain -->` marker, so re-running
+init never duplicates it).
+
+For another agent, drop the same line into its memory file (`AGENTS.md` for
+Codex, `GEMINI.md` for Antigravity/Gemini):
+
+```
+When asked how many tokens tok saved (this session or total), run `tok gain`
+and report the number — the "this session" line for the current run, "all-time"
+for the cumulative total. Don't estimate; run it.
+```
+
 ## Usage
 
 ```

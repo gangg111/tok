@@ -1966,6 +1966,42 @@ fn gain() -> i32 {
     0
 }
 
+const TOK_GAIN_INSTRUCTION: &str = "<!-- tok:gain -->
+## tok token savings
+When asked how many tokens tok (or you) saved — this session, today, or in
+total — run `tok gain` and report the number: the \"this session\" line for the
+current run, \"all-time\" for the cumulative total. Don't estimate or ask what
+was meant — run it and answer.
+<!-- /tok:gain -->
+";
+
+/// Append the gain self-report instruction to CLAUDE.md (global with -g, else
+/// project) so a freshly-installed agent answers "tokens saved" reflexively.
+/// Idempotent via a sentinel marker — shared with tok.py so the Rust→Python
+/// init delegation never double-writes.
+fn install_instruction(flags: &[String]) {
+    let global = flags.iter().any(|a| a == "-g");
+    let path = if global {
+        format!("{}/.claude/CLAUDE.md", home())
+    } else {
+        "CLAUDE.md".to_string()
+    };
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    if existing.contains("<!-- tok:gain -->") {
+        return;
+    }
+    if let Some(dir) = std::path::Path::new(&path).parent() {
+        if !dir.as_os_str().is_empty() {
+            let _ = fs::create_dir_all(dir);
+        }
+    }
+    let sep = if existing.is_empty() || existing.ends_with('\n') { "" } else { "\n" };
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = f.write_all(format!("{}{}", sep, TOK_GAIN_INSTRUCTION).as_bytes());
+        println!("tok gain instruction → {}", path);
+    }
+}
+
 fn usage() {
     println!("tok {} — universal token-diet proxy (native)", VERSION);
     println!("  tok <command> [args...]   run command through the best filter");
@@ -2254,6 +2290,7 @@ fn main() {
             _ => hook_claude(),
         },
         Some("init") => {
+            install_instruction(&argv[1..]);
             let py = format!("{}/tok/tok.py", home());
             let st = Command::new("python3").arg(&py).arg("init").args(&argv[1..]).status();
             match st {

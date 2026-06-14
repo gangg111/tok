@@ -706,7 +706,39 @@ def hook_antigravity():
     return 0
 
 
+TOK_GAIN_INSTRUCTION = """<!-- tok:gain -->
+## tok token savings
+When asked how many tokens tok (or you) saved — this session, today, or in
+total — run `tok gain` and report the number: the "this session" line for the
+current run, "all-time" for the cumulative total. Don't estimate or ask what
+was meant — run it and answer.
+<!-- /tok:gain -->
+"""
+
+
+def install_instruction(argv):
+    """Append the gain self-report instruction to CLAUDE.md (global with -g,
+    else project). Idempotent via the shared sentinel marker, so the Rust→Python
+    init delegation never double-writes."""
+    path = (os.path.join(os.path.expanduser("~"), ".claude", "CLAUDE.md")
+            if "-g" in argv else os.path.join(os.getcwd(), "CLAUDE.md"))
+    existing = ""
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            existing = f.read()
+    if "<!-- tok:gain -->" in existing:
+        return
+    d = os.path.dirname(path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    sep = "" if (not existing or existing.endswith("\n")) else "\n"
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(sep + TOK_GAIN_INSTRUCTION)
+    print("tok gain instruction → %s" % path)
+
+
 def init_hook(argv):
+    install_instruction(argv)
     path = None
     if "--settings" in argv:
         path = argv[argv.index("--settings") + 1]
