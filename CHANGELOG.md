@@ -4,7 +4,20 @@ All notable changes to **tok** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); tok follows
 [Semantic Versioning](https://semver.org/).
 
-## [0.3.0] — 2026-06-14
+## [0.3.1] — 2026-06-14
+
+### Fixed
+- **Windows output loss (CRLF) — the big one.** `resolve_cr` treated the `\r` of
+  a `\r\n` line ending as a progress-bar overwrite and discarded everything
+  before it, so any command that prints CRLF (cmd.exe, PowerShell, `where`,
+  `winget`, most native Windows tools) came back **empty → tok reported `ok`**,
+  silently dropping real output. On Windows — where Codex drives commands through
+  PowerShell — this made the agent lose context. `resolve_cr` is now CRLF-aware:
+  a trailing `\r` is stripped as a line terminator, and only a `\r` with content
+  after it (a redrawn progress bar) collapses to its final frame. Reproduced and
+  fixed on 0.3.0; thanks to a contributor's Windows testing for the report.
+
+
 
 Multi-agent integration, per-session savings, and safe rewriting of command chains.
 

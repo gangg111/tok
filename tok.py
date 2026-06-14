@@ -25,7 +25,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 CACHE_DIR = os.environ.get("TOK_CACHE") or os.path.join(
     os.path.expanduser("~"), ".cache", "tok")
 MAX_LINES = int(os.environ.get("TOK_MAX_LINES", "60"))
@@ -57,9 +57,13 @@ def strip_ansi(text):
 
 
 def resolve_cr(text):
-    """Keep only the final frame of \r-overwritten progress lines."""
+    r"""Keep only the final frame of \r-overwritten progress lines — but a
+    trailing CR is a CRLF line terminator (cmd.exe/PowerShell/native Windows),
+    not a progress overwrite, so strip it first or the whole line is lost."""
     out = []
     for line in text.split("\n"):
+        if line.endswith("\r"):
+            line = line[:-1]
         if "\r" in line:
             line = line.split("\r")[-1]
         out.append(line)

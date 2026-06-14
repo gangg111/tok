@@ -17,7 +17,7 @@ use std::sync::Mutex;
 static LAST_RAW: Mutex<String> = Mutex::new(String::new());
 static LAST_CODE: Mutex<i32> = Mutex::new(0);
 
-const VERSION: &str = "0.3.0";
+const VERSION: &str = "0.3.1";
 const HEAD_KEEP: usize = 12;
 const TAIL_KEEP: usize = 18;
 const LS_GROUP_MIN: usize = 200;
@@ -75,7 +75,14 @@ fn strip_ansi(s: &str) -> String {
 
 fn resolve_cr(s: &str) -> String {
     s.split('\n')
-        .map(|l| l.rsplit('\r').next().unwrap_or(l))
+        .map(|l| {
+            // A trailing CR is a CRLF line terminator (cmd.exe, PowerShell, most
+            // native Windows tools) — strip it, do NOT treat it as a progress
+            // overwrite. Only a CR with content AFTER it is an in-line overwrite
+            // (a `\r`-redrawn progress bar), where we keep the final segment.
+            let l = l.strip_suffix('\r').unwrap_or(l);
+            l.rsplit('\r').next().unwrap_or(l)
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -2192,6 +2199,19 @@ mod tests {
         assert_eq!(g[0], "dll:300:600K");
         assert_eq!(g[1], "exe:50:25K");
         assert!(g.contains(&String::from("noext:2")), "g = {:?}", g);
+    }
+
+    #[test]
+    fn resolve_cr_keeps_crlf_drops_progress() {
+        // CRLF line endings (cmd.exe, PowerShell, where, winget…) must survive:
+        // the \r before \n is a terminator, not a progress overwrite.
+        assert_eq!(resolve_cr("hello\r\n"), "hello\n");
+        assert_eq!(resolve_cr("a\r\nb\r\n"), "a\nb\n");
+        // plain LF is untouched
+        assert_eq!(resolve_cr("git version 2.5\n"), "git version 2.5\n");
+        // a genuine in-line \r-redraw still collapses to the final frame
+        assert_eq!(resolve_cr("10%\r50%\r100%"), "100%");
+        assert_eq!(resolve_cr("downloading\r100%\r\n"), "100%\n");
     }
 
     #[test]
