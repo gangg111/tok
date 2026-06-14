@@ -574,11 +574,32 @@ def save_raw(cmd, raw, code):
         pass
 
 
+def record_session(v):
+    sid = v.get("session_id") or v.get("conversationId") or ""
+    if not sid:
+        return
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        with open(os.path.join(CACHE_DIR, "session"), "w") as f:
+            f.write(sid)
+    except OSError:
+        pass
+
+
+def current_session():
+    try:
+        with open(os.path.join(CACHE_DIR, "session")) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
 def track(cmd, raw, filtered):
     try:
         os.makedirs(CACHE_DIR, exist_ok=True)
         with open(os.path.join(CACHE_DIR, "stats.jsonl"), "a") as f:
             f.write(json.dumps({"cmd": cmd[0] if cmd else "?", "ts": int(time.time()),
+                                "sid": current_session(),
                                 "in": count_tokens(raw), "out": count_tokens(filtered)}) + "\n")
     except OSError:
         pass
@@ -632,6 +653,7 @@ def hook_claude():
         v = json.loads(data)
     except ValueError:
         return 0
+    record_session(v)
     cmd = (v.get("tool_input") or {}).get("command", "")
     if not cmd or UNSAFE_RE.search(cmd):
         return 0
@@ -663,6 +685,7 @@ def hook_antigravity():
         v = json.loads(data)
     except ValueError:
         return 0
+    record_session(v)
     tc = v.get("toolCall") or {}
     args = tc.get("args") or {}
     cmd = args.get("CommandLine", "")
@@ -719,20 +742,31 @@ def gain():
     if not os.path.exists(p):
         print("no stats yet")
         return 0
+    cur = current_session()
     tin = tout = n = 0
+    sin = sout = sn = 0
     with open(p) as f:
         for ln in f:
             try:
                 d = json.loads(ln)
                 tin += d["in"]; tout += d["out"]; n += 1
+                if cur and d.get("sid") == cur:
+                    sin += d["in"]; sout += d["out"]; sn += 1
             except (ValueError, KeyError):
                 pass
-    pct = 100.0 * (1 - tout / tin) if tin else 0.0
-    print("tok: %d commands, %d → %d tokens (%.1f%% saved)" % (n, tin, tout, pct))
+    pct = lambda i, o: 100.0 * (1 - o / i) if i else 0.0
+    if cur and sn:
+        print("this session: %d commands, %d → %d tokens (%.1f%% saved)" % (sn, sin, sout, pct(sin, sout)))
+    print("all-time: %d commands, %d → %d tokens (%.1f%% saved)" % (n, tin, tout, pct(tin, tout)))
     return 0
 
 
 def main():
+    # emit UTF-8 regardless of the console codepage (Windows cp1250 chokes on →)
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
     argv = sys.argv[1:]
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__.strip())

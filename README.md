@@ -100,7 +100,7 @@ tok run -- <command> ...   force the generic filter (works on ANY command)
 tok proxy <command> ...    raw passthrough
 tok pipe [name]            filter stdin (gradle|maven|pytest|npm|pip|ffmpeg|citrace)
 tok full [n|list]          full raw output of the last (or n-th last) run
-tok gain                   cumulative token savings
+tok gain                   token savings — "this session" + "all-time"
 tok init [-g]              install the Claude Code PreToolUse rewrite hook
 tok hook claude|codex|gemini|copilot|cursor   hook entrypoints (JSON on stdin)
 ```

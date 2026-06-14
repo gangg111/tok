@@ -614,6 +614,27 @@ fn save_raw(cmd: &[String], raw: &str, code: i32) {
     );
 }
 
+/// Persist the current agent session id seen by a hook, so `track` can tag
+/// each command and `gain` can answer "this session" vs all-time. Tries the
+/// Claude/Codex key first, then Antigravity's conversationId.
+fn record_session(input: &str) {
+    let sid = extract_string_field(input, "\"session_id\"")
+        .or_else(|| extract_string_field(input, "\"conversationId\""))
+        .unwrap_or_default();
+    if sid.is_empty() {
+        return;
+    }
+    let dir = cache_dir();
+    let _ = fs::create_dir_all(&dir);
+    let _ = fs::write(format!("{}/session", dir), sid);
+}
+
+fn current_session() -> String {
+    fs::read_to_string(format!("{}/session", cache_dir()))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
 fn track(cmd: &[String], raw: &str, filtered: &str) {
     let dir = cache_dir();
     let _ = fs::create_dir_all(&dir);
@@ -621,8 +642,9 @@ fn track(cmd: &[String], raw: &str, filtered: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let line = format!("{{\"cmd\": \"{}\", \"ts\": {}, \"in\": {}, \"out\": {}}}\n",
+    let line = format!("{{\"cmd\": \"{}\", \"ts\": {}, \"sid\": \"{}\", \"in\": {}, \"out\": {}}}\n",
         esc_json(cmd.first().map(|s| s.as_str()).unwrap_or("?")), ts,
+        esc_json(&current_session()),
         raw.split_whitespace().count(), filtered.split_whitespace().count());
     let path = format!("{}/stats.jsonl", dir);
     if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
@@ -1733,6 +1755,7 @@ fn hook_claude() -> i32 {
     if input.is_empty() {
         return 0;
     }
+    record_session(&input);
     let (ti, qpos, cmd) = match claude_style_command(&input) {
         Some(t) => t,
         None => return 0,
@@ -1780,6 +1803,7 @@ fn hook_antigravity() -> i32 {
     if input.is_empty() {
         return 0;
     }
+    record_session(&input);
     let (s, e) = match object_after_key(&input, "\"toolCall\"") {
         Some(r) => r,
         None => return 0,
@@ -1808,6 +1832,7 @@ fn hook_gemini() -> i32 {
         println!("{{\"decision\": \"allow\"}}");
         return 0;
     }
+    record_session(&input);
     let tool = extract_string_field(&input, "\"tool_name\"").unwrap_or_default();
     if tool != "run_shell_command" {
         println!("{{\"decision\": \"allow\"}}");
@@ -1829,6 +1854,7 @@ fn hook_gemini() -> i32 {
 /// Cursor Agent hook: {} = no change; allow + updated_input on rewrite.
 fn hook_cursor() -> i32 {
     let input = read_stdin_trimmed();
+    record_session(&input);
     match claude_style_command(&input) {
         Some((_, _, cmd)) if hook_should_rewrite(&cmd) => {
             println!(
@@ -1849,6 +1875,7 @@ fn hook_copilot() -> i32 {
     if input.is_empty() {
         return 0;
     }
+    record_session(&input);
     if input.contains("\"tool_name\"") {
         let tool = extract_string_field(&input, "\"tool_name\"").unwrap_or_default();
         if !matches!(tool.as_str(), "runTerminalCommand" | "Bash" | "bash") {
@@ -1907,7 +1934,9 @@ fn gain() -> i32 {
             return 0;
         }
     };
+    let cur = current_session();
     let (mut tin, mut tout, mut n) = (0u64, 0u64, 0u64);
+    let (mut sin, mut sout, mut sn) = (0u64, 0u64, 0u64);
     for ln in data.lines() {
         let get = |key: &str| -> Option<u64> {
             let k = ln.find(key)?;
@@ -1922,14 +1951,18 @@ fn gain() -> i32 {
             tin += i;
             tout += o;
             n += 1;
+            if !cur.is_empty() && extract_string_field(ln, "\"sid\"").as_deref() == Some(cur.as_str()) {
+                sin += i;
+                sout += o;
+                sn += 1;
+            }
         }
     }
-    let pct = if tin > 0 {
-        100.0 * (1.0 - tout as f64 / tin as f64)
-    } else {
-        0.0
-    };
-    println!("tok: {} commands, {} → {} tokens ({:.1}% saved)", n, tin, tout, pct);
+    let pct = |inp: u64, outp: u64| if inp > 0 { 100.0 * (1.0 - outp as f64 / inp as f64) } else { 0.0 };
+    if !cur.is_empty() && sn > 0 {
+        println!("this session: {} commands, {} → {} tokens ({:.1}% saved)", sn, sin, sout, pct(sin, sout));
+    }
+    println!("all-time: {} commands, {} → {} tokens ({:.1}% saved)", n, tin, tout, pct(tin, tout));
     0
 }
 
