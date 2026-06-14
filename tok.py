@@ -645,6 +645,88 @@ REWRITABLE = set(list(HANDLERS) + list(NATIVE) + list(GROUPING) + [
     "pkg", "apt", "du", "df", "wc", "tree", "gh"])
 
 
+def seg_should_prefix(seg):
+    """Should a single simple segment (no top-level operators) get `tok `?"""
+    parts = seg.split()
+    first = os.path.basename(parts[0]) if parts else ""
+    if not first or first in ("tok", "rtk", "cd", "export", "source", "vim", "nano", "ssh"):
+        return False
+    rewrite_all = os.environ.get("TOK_REWRITE_ALL") == "1"
+    return rewrite_all or first in REWRITABLE or parts[0].endswith("gradlew")
+
+
+def rewrite_command(cmd):
+    """Quote-aware: prefix `tok ` to safe simple segments of a top-level
+    &&/||/; chain, leaving operators and non-rewritable segments intact. Returns
+    None (= leave whole command raw) on anything unsafe: pipes, redirects,
+    command substitution, subshells, background &, newline, unbalanced quotes."""
+    n = len(cmd)
+    segs, ops, start, i = [], [], 0, 0
+    while i < n:
+        c = cmd[i]
+        if c == "'":
+            i += 1
+            while i < n and cmd[i] != "'":
+                i += 1
+            if i >= n:
+                return None
+            i += 1
+        elif c == '"':
+            i += 1
+            while i < n:
+                if cmd[i] == "\\":
+                    i += 2
+                    continue
+                if cmd[i] == '"':
+                    break
+                i += 1
+            if i >= n:
+                return None
+            i += 1
+        elif c == "\\":
+            i += 2
+        elif c == "`":
+            return None
+        elif c == "$" and i + 1 < n and cmd[i + 1] == "(":
+            return None
+        elif c in "()<>\n":
+            return None
+        elif c == "&":
+            if i + 1 < n and cmd[i + 1] == "&":
+                segs.append(cmd[start:i]); ops.append("&&"); i += 2; start = i
+            else:
+                return None
+        elif c == "|":
+            if i + 1 < n and cmd[i + 1] == "|":
+                segs.append(cmd[start:i]); ops.append("||"); i += 2; start = i
+            else:
+                return None
+        elif c == ";":
+            segs.append(cmd[start:i]); ops.append(";"); i += 1; start = i
+        else:
+            i += 1
+    segs.append(cmd[start:])
+    out, any_ = [], False
+    for s in segs:
+        if s.strip() and seg_should_prefix(s):
+            # insert "tok " before the first non-whitespace char, keep the rest
+            # VERBATIM (escaped trailing space, tabs survive)
+            lead = len(s) - len(s.lstrip())
+            out.append(s[:lead] + "tok " + s[lead:]); any_ = True
+        else:
+            out.append(s)  # verbatim
+    if not any_:
+        return None
+    # bare operators between verbatim segments preserve spacing and keep a
+    # malformed ;; / dangling && a syntax error instead of "fixing" it
+    res = ""
+    for idx, s in enumerate(out):
+        if idx > 0:
+            res += ops[idx - 1]
+        res += s
+    return res
+
+
 def hook_claude():
     data = sys.stdin.read().strip()
     if not data:
@@ -655,16 +737,11 @@ def hook_claude():
         return 0
     record_session(v)
     cmd = (v.get("tool_input") or {}).get("command", "")
-    if not cmd or UNSAFE_RE.search(cmd):
-        return 0
-    first = os.path.basename(cmd.split()[0])
-    rewrite_all = os.environ.get("TOK_REWRITE_ALL") == "1"
-    if first in ("tok", "rtk", "cd", "export", "source", "vim", "nano", "ssh"):
-        return 0
-    if not rewrite_all and first not in REWRITABLE and not cmd.split()[0].endswith("gradlew"):
+    new = rewrite_command(cmd) if cmd else None
+    if new is None:
         return 0
     ti = dict(v.get("tool_input") or {})
-    ti["command"] = "tok " + cmd
+    ti["command"] = new
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
@@ -689,16 +766,11 @@ def hook_antigravity():
     tc = v.get("toolCall") or {}
     args = tc.get("args") or {}
     cmd = args.get("CommandLine", "")
-    if not cmd or UNSAFE_RE.search(cmd):
-        return 0
-    first = os.path.basename(cmd.split()[0])
-    rewrite_all = os.environ.get("TOK_REWRITE_ALL") == "1"
-    if first in ("tok", "rtk", "cd", "export", "source", "vim", "nano", "ssh"):
-        return 0
-    if not rewrite_all and first not in REWRITABLE and not cmd.split()[0].endswith("gradlew"):
+    new = rewrite_command(cmd) if cmd else None
+    if new is None:
         return 0
     new_args = dict(args)
-    new_args["CommandLine"] = "tok " + cmd
+    new_args["CommandLine"] = new
     new_tc = dict(tc)
     new_tc["args"] = new_args
     # overwrite is applied only when paired with an explicit allow decision

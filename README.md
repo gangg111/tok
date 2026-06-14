@@ -28,8 +28,11 @@ tok init
 
 tok plugs into each agent's "before a shell command runs" hook. Point that hook
 at `tok hook <agent>`, matched to the shell/Bash tool — tok rewrites simple
-commands to `tok <cmd>` and passes everything else (chains, `cd`, `ssh`…)
-through untouched.
+commands to `tok <cmd>`, and in `&&`/`||`/`;` chains it prefixes each safe
+segment (`cd src && cargo build` → `cd src && tok cargo build`). A quote-aware
+scanner leaves `cd`/`ssh`/env-prefixes raw and bails the whole command to raw on
+anything it can't rewrite without risk (pipes, redirects, `$()`, subshells,
+background `&`) — so the rewrite never changes a command's behavior.
 
 | Agent | Config file | Hook command |
 |---|---|---|
@@ -147,7 +150,7 @@ tok hook claude|codex|gemini|copilot|cursor   hook entrypoints (JSON on stdin)
 ## Tests
 
 ```sh
-rustc --test -o tok-test tok.rs && ./tok-test   # 16 unit tests
+rustc --test -o tok-test tok.rs && ./tok-test   # unit tests
 python3 bench/bench.py                          # 10-case benchmark vs rtk
 python3 bench/bench2.py                         # rtk's own fixtures benchmark
 python3 bench/latency.py                        # latency benchmark

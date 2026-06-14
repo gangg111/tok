@@ -1705,22 +1705,143 @@ fn parse_json_string(s: &str) -> Option<String> {
     None
 }
 
-/// Shared gate: should this command string be rewritten to `tok <cmd>`?
-fn hook_should_rewrite(cmd: &str) -> bool {
-    if cmd.is_empty() {
-        return false;
-    }
-    if cmd.contains('|') || cmd.contains(';') || cmd.contains('&') || cmd.contains('<')
-        || cmd.contains('>') || cmd.contains('`') || cmd.contains('\n') || cmd.contains("$(") {
-        return false;
-    }
-    let first_tok = cmd.split_whitespace().next().unwrap_or("");
+/// Should a single simple segment (no top-level shell operators — the caller
+/// guarantees this) get a `tok ` prefix? Classifies by first word only.
+fn seg_should_prefix(seg: &str) -> bool {
+    let first_tok = seg.split_whitespace().next().unwrap_or("");
     let first = basename(first_tok);
-    if ["tok", "rtk", "cd", "export", "source", "vim", "nano", "ssh"].contains(&first) {
+    if first.is_empty()
+        || ["tok", "rtk", "cd", "export", "source", "vim", "nano", "ssh"].contains(&first)
+    {
         return false;
     }
     let rewrite_all = env::var("TOK_REWRITE_ALL").map(|v| v == "1").unwrap_or(false);
     rewrite_all || REWRITABLE.contains(&first) || first_tok.ends_with("gradlew")
+}
+
+/// Quote-aware rewrite: prefix `tok ` to each safe simple segment of a
+/// top-level `&&`/`||`/`;` chain, leaving operators and non-rewritable segments
+/// (cd, sudo, …) intact. Returns None — meaning "leave the whole command raw,
+/// exactly as today" — on ANYTHING we can't handle with certainty: pipes,
+/// redirects, command substitution `$(`/backtick, subshells `()`, background
+/// `&`, newlines, or unbalanced quotes. This makes the rewrite strictly safe
+/// (worst case = no change) and strictly additive for savings.
+fn rewrite_command(cmd: &str) -> Option<String> {
+    let b = cmd.as_bytes();
+    let mut segs: Vec<&str> = Vec::new();
+    let mut ops: Vec<&str> = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < b.len() {
+        match b[i] {
+            b'\'' => {
+                i += 1;
+                while i < b.len() && b[i] != b'\'' {
+                    i += 1;
+                }
+                if i >= b.len() {
+                    return None; // unbalanced single quote
+                }
+                i += 1;
+            }
+            b'"' => {
+                i += 1;
+                while i < b.len() {
+                    if b[i] == b'\\' {
+                        i += 2;
+                        continue;
+                    }
+                    if b[i] == b'"' {
+                        break;
+                    }
+                    i += 1;
+                }
+                if i >= b.len() {
+                    return None; // unbalanced double quote
+                }
+                i += 1;
+            }
+            b'\\' => i += 2, // escape next char (outside quotes)
+            b'`' => return None,
+            b'$' if b.get(i + 1) == Some(&b'(') => return None,
+            b'(' | b')' | b'<' | b'>' | b'\n' => return None,
+            b'&' => {
+                if b.get(i + 1) == Some(&b'&') {
+                    segs.push(&cmd[start..i]);
+                    ops.push("&&");
+                    i += 2;
+                    start = i;
+                } else {
+                    return None; // background &
+                }
+            }
+            b'|' => {
+                if b.get(i + 1) == Some(&b'|') {
+                    segs.push(&cmd[start..i]);
+                    ops.push("||");
+                    i += 2;
+                    start = i;
+                } else {
+                    return None; // pipe
+                }
+            }
+            b';' => {
+                segs.push(&cmd[start..i]);
+                ops.push(";");
+                i += 1;
+                start = i;
+            }
+            _ => i += 1,
+        }
+    }
+    segs.push(&cmd[start..]);
+    let mut any = false;
+    let mut out: Vec<String> = Vec::with_capacity(segs.len());
+    for s in &segs {
+        if !s.trim().is_empty() && seg_should_prefix(s) {
+            // Insert "tok " before the first non-whitespace byte and keep the
+            // segment otherwise VERBATIM — never trim, so a backslash-escaped
+            // trailing space (`-m hi\ `) and tabs survive unchanged.
+            let lead = s.len() - s.trim_start().len();
+            out.push(format!("{}tok {}", &s[..lead], &s[lead..]));
+            any = true;
+        } else {
+            out.push((*s).to_string()); // verbatim
+        }
+    }
+    if !any {
+        return None;
+    }
+    // Bare operators between verbatim segments reconstruct the original spacing
+    // exactly — and keep a malformed `;;`/dangling-`&&` a syntax error rather
+    // than silently "fixing" it into a working (and possibly destructive) one.
+    let mut res = String::new();
+    for (idx, s) in out.iter().enumerate() {
+        if idx > 0 {
+            res.push_str(ops[idx - 1]);
+        }
+        res.push_str(s);
+    }
+    Some(res)
+}
+
+/// Index just past the closing quote of a JSON string that starts at `start`
+/// (which must be an opening `"`). Used to splice a new command value into an
+/// existing tool_input without disturbing sibling fields.
+fn json_string_end(s: &str, start: usize) -> Option<usize> {
+    let b = s.as_bytes();
+    if b.get(start) != Some(&b'"') {
+        return None;
+    }
+    let mut i = start + 1;
+    while i < b.len() {
+        match b[i] {
+            b'\\' => i += 2,
+            b'"' => return Some(i + 1),
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 fn read_stdin_trimmed() -> String {
@@ -1760,11 +1881,16 @@ fn hook_claude() -> i32 {
         Some(t) => t,
         None => return 0,
     };
-    if !hook_should_rewrite(&cmd) {
-        return 0;
-    }
-    // preserve every tool_input field: inject "tok " into the command value
-    let updated = format!("{}tok {}", &ti[..qpos + 1], &ti[qpos + 1..]);
+    let new = match rewrite_command(&cmd) {
+        Some(n) => n,
+        None => return 0,
+    };
+    let end = match json_string_end(&ti, qpos) {
+        Some(e) => e,
+        None => return 0,
+    };
+    // replace just the command value, preserving every other tool_input field
+    let updated = format!("{}\"{}\"{}", &ti[..qpos], esc_json(&new), &ti[end..]);
     println!(
         "{{\"hookSpecificOutput\": {{\"hookEventName\": \"PreToolUse\", \
          \"permissionDecision\": \"allow\", \
@@ -1817,10 +1943,15 @@ fn hook_antigravity() -> i32 {
         Some(c) => c,
         None => return 0,
     };
-    if !hook_should_rewrite(&cmd) {
-        return 0;
-    }
-    let new_tc = format!("{}tok {}", &tc[..q + 1], &tc[q + 1..]);
+    let new = match rewrite_command(&cmd) {
+        Some(n) => n,
+        None => return 0,
+    };
+    let qend = match json_string_end(tc, q) {
+        Some(e) => e,
+        None => return 0,
+    };
+    let new_tc = format!("{}\"{}\"{}", &tc[..q], esc_json(&new), &tc[qend..]);
     println!("{{\"decision\": \"allow\", \"overwrite\": {}}}", new_tc);
     0
 }
@@ -1838,15 +1969,15 @@ fn hook_gemini() -> i32 {
         println!("{{\"decision\": \"allow\"}}");
         return 0;
     }
-    match claude_style_command(&input) {
-        Some((_, _, cmd)) if hook_should_rewrite(&cmd) => {
+    match claude_style_command(&input).and_then(|(_, _, cmd)| rewrite_command(&cmd)) {
+        Some(new) => {
             println!(
                 "{{\"decision\": \"allow\", \"hookSpecificOutput\": \
-                 {{\"tool_input\": {{\"command\": \"tok {}\"}}}}}}",
-                esc_json(&cmd)
+                 {{\"tool_input\": {{\"command\": \"{}\"}}}}}}",
+                esc_json(&new)
             );
         }
-        _ => println!("{{\"decision\": \"allow\"}}"),
+        None => println!("{{\"decision\": \"allow\"}}"),
     }
     0
 }
@@ -1855,15 +1986,15 @@ fn hook_gemini() -> i32 {
 fn hook_cursor() -> i32 {
     let input = read_stdin_trimmed();
     record_session(&input);
-    match claude_style_command(&input) {
-        Some((_, _, cmd)) if hook_should_rewrite(&cmd) => {
+    match claude_style_command(&input).and_then(|(_, _, cmd)| rewrite_command(&cmd)) {
+        Some(new) => {
             println!(
                 "{{\"continue\": true, \"permission\": \"allow\", \
-                 \"updated_input\": {{\"command\": \"tok {}\"}}}}",
-                esc_json(&cmd)
+                 \"updated_input\": {{\"command\": \"{}\"}}}}",
+                esc_json(&new)
             );
         }
-        _ => println!("{{}}"),
+        None => println!("{{}}"),
     }
     0
 }
@@ -1881,16 +2012,14 @@ fn hook_copilot() -> i32 {
         if !matches!(tool.as_str(), "runTerminalCommand" | "Bash" | "bash") {
             return 0;
         }
-        if let Some((_, _, cmd)) = claude_style_command(&input) {
-            if hook_should_rewrite(&cmd) {
-                println!(
-                    "{{\"hookSpecificOutput\": {{\"hookEventName\": \"PreToolUse\", \
-                     \"permissionDecision\": \"allow\", \
-                     \"permissionDecisionReason\": \"tok auto-rewrite\", \
-                     \"updatedInput\": {{\"command\": \"tok {}\"}}}}}}",
-                    esc_json(&cmd)
-                );
-            }
+        if let Some(new) = claude_style_command(&input).and_then(|(_, _, c)| rewrite_command(&c)) {
+            println!(
+                "{{\"hookSpecificOutput\": {{\"hookEventName\": \"PreToolUse\", \
+                 \"permissionDecision\": \"allow\", \
+                 \"permissionDecisionReason\": \"tok auto-rewrite\", \
+                 \"updatedInput\": {{\"command\": \"{}\"}}}}}}",
+                esc_json(&new)
+            );
         }
         return 0;
     }
@@ -1910,10 +2039,15 @@ fn hook_copilot() -> i32 {
         Some(c) => c,
         None => return 0,
     };
-    if !hook_should_rewrite(&cmd) {
-        return 0;
-    }
-    let modified = format!("{}tok {}", &args_obj[..qpos + 1], &args_obj[qpos + 1..]);
+    let new = match rewrite_command(&cmd) {
+        Some(n) => n,
+        None => return 0,
+    };
+    let qend = match json_string_end(&args_obj, qpos) {
+        Some(e) => e,
+        None => return 0,
+    };
+    let modified = format!("{}\"{}\"{}", &args_obj[..qpos], esc_json(&new), &args_obj[qend..]);
     println!(
         "{{\"permissionDecision\": \"allow\", \
          \"permissionDecisionReason\": \"tok auto-rewrite\", \
@@ -2163,24 +2297,52 @@ mod tests {
     }
 
     #[test]
-    fn hook_claude_injects_and_preserves_fields() {
+    fn hook_claude_replaces_command_preserving_fields() {
         let input = r#"{"tool_name":"Bash","tool_input":{"command":"git status","description":"d"}}"#;
         let (ti, q, cmd) = claude_style_command(input).unwrap();
         assert_eq!(cmd, "git status");
-        assert!(hook_should_rewrite(&cmd));
-        let updated = format!("{}tok {}", &ti[..q + 1], &ti[q + 1..]);
+        let new = rewrite_command(&cmd).unwrap();
+        assert_eq!(new, "tok git status");
+        let end = json_string_end(&ti, q).unwrap();
+        let updated = format!("{}\"{}\"{}", &ti[..q], esc_json(&new), &ti[end..]);
         assert!(updated.contains(r#""command":"tok git status""#));
-        assert!(updated.contains(r#""description":"d""#));
+        assert!(updated.contains(r#""description":"d""#)); // sibling preserved
     }
 
     #[test]
-    fn hook_gates_unsafe_and_meta() {
-        assert!(!hook_should_rewrite("git status && git push"));
-        assert!(!hook_should_rewrite("cat x | grep y"));
-        assert!(!hook_should_rewrite("rtk git status"));
-        assert!(!hook_should_rewrite("cd /tmp"));
-        assert!(hook_should_rewrite("./gradlew assembleDebug"));
-        assert!(hook_should_rewrite("ffmpeg -i a.wav b.mp3"));
+    fn rewrite_command_safety_and_chains() {
+        // unsafe constructs → leave the whole command raw (None == today's behavior)
+        assert!(rewrite_command("cat x | grep y").is_none());
+        assert!(rewrite_command("cargo build > log").is_none());
+        assert!(rewrite_command("git diff $(git merge-base a b)").is_none());
+        assert!(rewrite_command("ls `pwd`").is_none());
+        assert!(rewrite_command("server &").is_none());
+        assert!(rewrite_command("echo \"unbalanced").is_none());
+        // never-rewrite / non-rewritable single command → None
+        assert!(rewrite_command("rtk git status").is_none());
+        assert!(rewrite_command("cd /tmp").is_none());
+        assert!(rewrite_command("echo hi").is_none());
+        // simple rewritable → prefixed
+        assert_eq!(rewrite_command("./gradlew assembleDebug").unwrap(), "tok ./gradlew assembleDebug");
+        assert_eq!(rewrite_command("ffmpeg -i a.wav b.mp3").unwrap(), "tok ffmpeg -i a.wav b.mp3");
+        // &&/||/; chains: prefix safe segments, keep operators + non-rewritable raw
+        assert_eq!(rewrite_command("cd src && cargo build").unwrap(), "cd src && tok cargo build");
+        assert_eq!(rewrite_command("git add -A && git commit -m x").unwrap(),
+                   "tok git add -A && tok git commit -m x");
+        assert_eq!(rewrite_command("cargo test || true").unwrap(), "tok cargo test || true");
+        assert_eq!(rewrite_command("git fetch ; git status").unwrap(), "tok git fetch ; tok git status");
+        // operator inside quotes must NOT split the command
+        assert_eq!(rewrite_command(r#"git commit -m "a && b""#).unwrap(),
+                   r#"tok git commit -m "a && b""#);
+        // a pipe anywhere in a chain → bail entirely (raw)
+        assert!(rewrite_command("cargo build && cat x | grep y").is_none());
+        // regression (adversarial review): a backslash-escaped trailing space is
+        // part of the argument and must survive verbatim — no trimming.
+        assert_eq!(rewrite_command("git commit -m hi\\ ").unwrap(), "tok git commit -m hi\\ ");
+        // regression: `;;` is a bash syntax error and must STAY one, not get
+        // "repaired" into two valid `;` (which could activate a dead command).
+        assert_eq!(rewrite_command("git status;;cargo build").unwrap(),
+                   "tok git status;;tok cargo build");
     }
 
     #[test]
@@ -2194,8 +2356,9 @@ mod tests {
         let q = quoted_value_pos(tc, "\"CommandLine\"").unwrap();
         let cmd = parse_json_string(&tc[q..]).unwrap();
         assert_eq!(cmd, "git status");
-        assert!(hook_should_rewrite(&cmd));
-        let new_tc = format!("{}tok {}", &tc[..q + 1], &tc[q + 1..]);
+        let new = rewrite_command(&cmd).unwrap();
+        let qend = json_string_end(tc, q).unwrap();
+        let new_tc = format!("{}\"{}\"{}", &tc[..q], esc_json(&new), &tc[qend..]);
         let out = format!("{{\"decision\": \"allow\", \"overwrite\": {}}}", new_tc);
         assert!(out.contains(r#""CommandLine":"tok git status""#));
         assert!(out.contains(r#""Cwd":"/repo""#)); // sibling arg preserved
@@ -2210,8 +2373,9 @@ mod tests {
         let input = r#"{"session_id":"s","cwd":"/repo","hook_event_name":"PreToolUse","turn_id":"t1","tool_name":"Bash","tool_use_id":"call_42","tool_input":{"command":"cargo build"}}"#;
         let (ti, q, cmd) = claude_style_command(input).unwrap();
         assert_eq!(cmd, "cargo build");
-        assert!(hook_should_rewrite(&cmd));
-        let updated = format!("{}tok {}", &ti[..q + 1], &ti[q + 1..]);
+        let new = rewrite_command(&cmd).unwrap();
+        let end = json_string_end(&ti, q).unwrap();
+        let updated = format!("{}\"{}\"{}", &ti[..q], esc_json(&new), &ti[end..]);
         assert!(updated.contains(r#""command":"tok cargo build""#));
     }
 
