@@ -17,7 +17,7 @@ use std::sync::Mutex;
 static LAST_RAW: Mutex<String> = Mutex::new(String::new());
 static LAST_CODE: Mutex<i32> = Mutex::new(0);
 
-const VERSION: &str = "0.2.0";
+const VERSION: &str = "0.3.0";
 const HEAD_KEEP: usize = 12;
 const TAIL_KEEP: usize = 18;
 const LS_GROUP_MIN: usize = 200;

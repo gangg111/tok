@@ -4,6 +4,8 @@ Filters and compresses command output **before it reaches an LLM context**.
 Inspired by [rtk](https://github.com/rtk-ai/rtk) (Apache-2.0); built to beat it
 in every measured aspect — see `bench/REPORT.md` for the full evidence.
 
+What's new in each version: [CHANGELOG.md](CHANGELOG.md) (current: 0.3.0).
+
 Two implementations of the same filters:
 
 | file | what | when to use |

@@ -25,7 +25,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.1.0"
+VERSION = "0.3.0"
 CACHE_DIR = os.environ.get("TOK_CACHE") or os.path.join(
     os.path.expanduser("~"), ".cache", "tok")
 MAX_LINES = int(os.environ.get("TOK_MAX_LINES", "60"))
