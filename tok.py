@@ -14,7 +14,7 @@ Usage:
   tok pipe [name]              filter stdin (named or generic filter)
   tok full                     print full raw output of the last run
   tok gain                     show cumulative token savings
-  tok init [-g] [--settings P] install Claude Code PreToolUse rewrite hook
+  tok init [--local] [--settings P]  install hook + gain instruction (global by default)
   tok hook claude|codex|antigravity   hook entrypoint (reads JSON on stdin)
 """
 import io
@@ -717,11 +717,13 @@ was meant — run it and answer.
 
 
 def install_instruction(argv):
-    """Append the gain self-report instruction to CLAUDE.md (global with -g,
-    else project). Idempotent via the shared sentinel marker, so the Rust→Python
-    init delegation never double-writes."""
-    path = (os.path.join(os.path.expanduser("~"), ".claude", "CLAUDE.md")
-            if "-g" in argv else os.path.join(os.getcwd(), "CLAUDE.md"))
+    """Append the gain self-report instruction to CLAUDE.md. Global (~/.claude)
+    by default — tok is a machine-wide tool; pass --local for the project file.
+    Idempotent via the shared sentinel marker, so the Rust→Python init
+    delegation never double-writes."""
+    local = "--local" in argv or "--project" in argv
+    path = (os.path.join(os.getcwd(), "CLAUDE.md") if local
+            else os.path.join(os.path.expanduser("~"), ".claude", "CLAUDE.md"))
     existing = ""
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
@@ -742,10 +744,10 @@ def init_hook(argv):
     path = None
     if "--settings" in argv:
         path = argv[argv.index("--settings") + 1]
-    elif "-g" in argv:
-        path = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
-    else:
+    elif "--local" in argv or "--project" in argv:
         path = os.path.join(os.getcwd(), ".claude", "settings.json")
+    else:
+        path = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
     settings = {}
     if os.path.exists(path):
         with open(path) as f:

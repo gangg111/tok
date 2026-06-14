@@ -1975,16 +1975,17 @@ was meant — run it and answer.
 <!-- /tok:gain -->
 ";
 
-/// Append the gain self-report instruction to CLAUDE.md (global with -g, else
-/// project) so a freshly-installed agent answers "tokens saved" reflexively.
+/// Append the gain self-report instruction to CLAUDE.md so a freshly-installed
+/// agent answers "tokens saved" reflexively. Global (~/.claude) by default —
+/// tok is a machine-wide tool; `--local`/`--project` targets the project file.
 /// Idempotent via a sentinel marker — shared with tok.py so the Rust→Python
 /// init delegation never double-writes.
 fn install_instruction(flags: &[String]) {
-    let global = flags.iter().any(|a| a == "-g");
-    let path = if global {
-        format!("{}/.claude/CLAUDE.md", home())
-    } else {
+    let local = flags.iter().any(|a| a == "--local" || a == "--project");
+    let path = if local {
         "CLAUDE.md".to_string()
+    } else {
+        format!("{}/.claude/CLAUDE.md", home())
     };
     let existing = fs::read_to_string(&path).unwrap_or_default();
     if existing.contains("<!-- tok:gain -->") {
@@ -2010,7 +2011,7 @@ fn usage() {
     println!("  tok pipe [name]           filter stdin (gradle|pytest|npm|pip|ffmpeg|generic)");
     println!("  tok full                  print full raw output of the last run");
     println!("  tok gain                  cumulative token savings");
-    println!("  tok init [-g]             install Claude Code hook (delegates to tok.py)");
+    println!("  tok init [--local]        install hook + gain instruction (global by default)");
     println!("  tok hook claude|codex|antigravity|gemini|copilot|cursor   hook entrypoint (JSON on stdin)");
 }
 

@@ -20,8 +20,8 @@ rustc -O -o tok tok.rs && mv tok ~/.local/bin/
 # or the Python fallback
 cp tok.py ~/.local/bin/tok && chmod +x ~/.local/bin/tok
 
-# hook into Claude Code (CLI & desktop)
-tok init -g
+# hook into Claude Code (CLI & desktop) — installs globally by default
+tok init
 ```
 
 ## Hook setup per agent
@@ -33,7 +33,7 @@ through untouched.
 
 | Agent | Config file | Hook command |
 |---|---|---|
-| Claude Code (CLI, desktop) | `~/.claude/settings.json` — or just run `tok init -g` | `tok hook claude` |
+| Claude Code (CLI, desktop) | `~/.claude/settings.json` — or just run `tok init` | `tok hook claude` |
 | OpenAI Codex (CLI, desktop, IDE) | `~/.codex/config.toml` | `tok hook codex` |
 | Google Antigravity (agy CLI + desktop) | `~/.gemini/config/hooks.json` | `tok hook antigravity` |
 | Gemini CLI | `~/.gemini/settings.json` | `tok hook gemini` |
@@ -97,9 +97,10 @@ rewrite — no extra setup beyond pointing the agent at the command.
 `tok gain` prints a per-session and an all-time total. For an agent to answer
 "how many tokens did you save this session?" reflexively, it needs that mapping
 in its context. `tok init` does this for Claude Code automatically — alongside
-the hook it appends a short instruction to `CLAUDE.md` (global with `-g`, else
-the project file), idempotently (a `<!-- tok:gain -->` marker, so re-running
-init never duplicates it).
+the hook it appends a short instruction to `~/.claude/CLAUDE.md` (global by
+default, since tok is machine-wide; `--local` targets the project file),
+idempotently (a `<!-- tok:gain -->` marker, so re-running init never duplicates
+it).
 
 For another agent, drop the same line into its memory file (`AGENTS.md` for
 Codex, `GEMINI.md` for Antigravity/Gemini):
