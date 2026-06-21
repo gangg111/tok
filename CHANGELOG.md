@@ -4,6 +4,24 @@ All notable changes to **tok** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); tok follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.3] — 2026-06-21
+
+### Fixed
+- **Hang on commands that spawn a persistent daemon (Gradle).** `run_raw` used
+  `Command::output()`, which reads stdout/stderr to EOF. A command whose
+  grandchild keeps a pipe write-end open — the **Gradle daemon** is the classic
+  case (`tok gradlew … ` in the default daemon mode) — never reaches EOF, so tok
+  hung **forever**. Two-part fix, verified against a real Gradle 9.3.1 daemon
+  build and a synthetic repro:
+  - drain stdout/stderr on threads, wait on the *direct* child, then take the
+    captured output once it goes quiet (hard-capped) — so an orphaned daemon
+    can't block tok; output and exit code are preserved in full.
+  - on Windows, flip tok's own stdout/stderr to **non-inheritable** across the
+    spawn (`SetHandleInformation`), so the grandchild daemon can't inherit the
+    pipe our parent (the agent) reads and hold it open after we exit — which had
+    hung the *calling* agent too. (`tok.py`: `Popen` + drain thread; `close_fds`
+    already covers the inheritance side.)
+
 ## [0.3.2] — 2026-06-21
 
 ### Fixed

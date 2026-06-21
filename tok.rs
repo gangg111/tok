@@ -9,7 +9,9 @@ use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// Raw output of the most recent child command — used by the panic guard:
 /// if a filter ever crashes, the user still gets the full raw output
@@ -17,7 +19,7 @@ use std::sync::Mutex;
 static LAST_RAW: Mutex<String> = Mutex::new(String::new());
 static LAST_CODE: Mutex<i32> = Mutex::new(0);
 
-const VERSION: &str = "0.3.2";
+const VERSION: &str = "0.3.3";
 const HEAD_KEEP: usize = 12;
 const TAIL_KEEP: usize = 18;
 const LS_GROUP_MIN: usize = 200;
@@ -572,12 +574,103 @@ fn rules_filter(name: &str, raw: &str, code: i32) -> String {
 
 // ── execution plumbing ───────────────────────────────────────────────
 
+/// Windows: toggle whether OUR OWN stdout/stderr are inheritable by children.
+/// We flip them off around a spawn so a persistent grandchild (the Gradle daemon
+/// is the textbook case) can't inherit the write-end of the pipe our parent (the
+/// agent) reads — which it would otherwise hold open after we exit, hanging the
+/// agent forever. The child's own stdio is a separate, redirected pipe and is
+/// unaffected. stdin is left alone so interactive commands keep working.
+#[cfg(windows)]
+fn set_std_inherit(inherit: bool) {
+    extern "system" {
+        fn GetStdHandle(n: u32) -> isize;
+        fn SetHandleInformation(h: isize, mask: u32, flags: u32) -> i32;
+    }
+    const HANDLE_FLAG_INHERIT: u32 = 0x1;
+    let flags = if inherit { HANDLE_FLAG_INHERIT } else { 0 };
+    // STD_OUTPUT_HANDLE = (DWORD)-11, STD_ERROR_HANDLE = (DWORD)-12
+    for n in [0xFFFF_FFF5u32, 0xFFFF_FFF4u32] {
+        unsafe {
+            let h = GetStdHandle(n);
+            if h != 0 && h != -1 {
+                SetHandleInformation(h, HANDLE_FLAG_INHERIT, flags);
+            }
+        }
+    }
+}
+#[cfg(not(windows))]
+fn set_std_inherit(_inherit: bool) {}
+
 fn run_raw(cmd: &[String]) -> (String, i32) {
-    let (s, code) = match Command::new(&cmd[0]).args(&cmd[1..]).stdin(Stdio::inherit()).output() {
-        Ok(o) => {
-            let mut s = String::from_utf8_lossy(&o.stdout).into_owned();
-            s.push_str(&String::from_utf8_lossy(&o.stderr));
-            (s, o.status.code().unwrap_or(1))
+    // We deliberately avoid Command::output(): it reads stdout/stderr to EOF, and
+    // a command that leaves a persistent grandchild holding a pipe write-end (the
+    // Gradle daemon) never reaches EOF, so output() would hang tok forever. We
+    // drain the pipes on threads, wait on the DIRECT child, then take whatever was
+    // read once output goes quiet. We also flip our own std handles non-inheritable
+    // across the spawn so that grandchild can't inherit the agent's pipe (above).
+    set_std_inherit(false);
+    let spawned = Command::new(&cmd[0])
+        .args(&cmd[1..])
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    set_std_inherit(true);
+    let (s, code) = match spawned {
+        Ok(mut child) => {
+            let out_buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+            let err_buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+            let mut so = child.stdout.take();
+            let mut se = child.stderr.take();
+            let ob = out_buf.clone();
+            let ho = thread::spawn(move || {
+                if let Some(r) = so.as_mut() {
+                    let mut tmp = [0u8; 8192];
+                    while let Ok(n) = r.read(&mut tmp) {
+                        if n == 0 {
+                            break;
+                        }
+                        ob.lock().unwrap().extend_from_slice(&tmp[..n]);
+                    }
+                }
+            });
+            let eb = err_buf.clone();
+            let he = thread::spawn(move || {
+                if let Some(r) = se.as_mut() {
+                    let mut tmp = [0u8; 8192];
+                    while let Ok(n) = r.read(&mut tmp) {
+                        if n == 0 {
+                            break;
+                        }
+                        eb.lock().unwrap().extend_from_slice(&tmp[..n]);
+                    }
+                }
+            });
+            let code = child.wait().ok().and_then(|st| st.code()).unwrap_or(1);
+            // Direct child has exited → all ITS output is now in the pipes. Readers
+            // reach EOF (finish) once every write-end closes; a daemon keeps one
+            // open, so also stop once the captured bytes go quiet (drain complete),
+            // with a generous hard cap as a final backstop.
+            let hard = Instant::now() + Duration::from_secs(10);
+            let mut last = 0usize;
+            let mut quiet = Instant::now();
+            loop {
+                if ho.is_finished() && he.is_finished() {
+                    break;
+                }
+                let n = out_buf.lock().unwrap().len() + err_buf.lock().unwrap().len();
+                if n != last {
+                    last = n;
+                    quiet = Instant::now();
+                }
+                if quiet.elapsed() >= Duration::from_millis(200) || Instant::now() >= hard {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            let mut s = String::from_utf8_lossy(&out_buf.lock().unwrap()).into_owned();
+            s.push_str(&String::from_utf8_lossy(&err_buf.lock().unwrap()));
+            (s, code)
         }
         Err(_) => (format!("{}: command not found", cmd[0]), 127),
     };

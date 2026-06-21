@@ -23,9 +23,10 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 CACHE_DIR = os.environ.get("TOK_CACHE") or os.path.join(
     os.path.expanduser("~"), ".cache", "tok")
 MAX_LINES = int(os.environ.get("TOK_MAX_LINES", "60"))
@@ -562,14 +563,33 @@ LAST = {"raw": "", "code": 0}
 
 
 def run_raw(cmd):
+    # Avoid subprocess.run/communicate: they read to EOF, and a command that
+    # leaves a persistent grandchild holding the pipe write-end (the Gradle
+    # daemon) never reaches EOF → tok would hang forever. Drain on a thread, wait
+    # on the DIRECT child, then take what was read (capped). close_fds=True
+    # (Python's default) already stops the grandchild from inheriting our own
+    # stdout, so a parent capturing tok's output still gets EOF when tok exits.
     try:
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        out = proc.stdout.decode("utf-8", "replace")
-        LAST.update(raw=out, code=proc.returncode)
-        return {"out": out, "code": proc.returncode}
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     except FileNotFoundError:
         LAST.update(raw="%s: command not found" % cmd[0], code=127)
         return {"out": "%s: command not found" % cmd[0], "code": 127}
+    chunks = []
+
+    def _drain():
+        try:
+            for chunk in iter(lambda: proc.stdout.read(8192), b""):
+                chunks.append(chunk)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_drain, daemon=True)
+    t.start()
+    proc.wait()
+    t.join(2.0)  # readers finish at once normally; a daemon holding the pipe caps here
+    out = b"".join(chunks).decode("utf-8", "replace")
+    LAST.update(raw=out, code=proc.returncode)
+    return {"out": out, "code": proc.returncode}
 
 
 def save_raw(cmd, raw, code):
