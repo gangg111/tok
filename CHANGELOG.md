@@ -4,6 +4,28 @@ All notable changes to **tok** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); tok follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] — 2026-06-21
+
+### Fixed
+- **Windows doubled-CR data loss.** `resolve_cr` stripped only one trailing `\r`,
+  so a line ending in `\r\r\n` (emitted when a tool's `\r\n` passes through a
+  layer that re-adds `\r` — common on Windows) collapsed to an empty final frame:
+  the whole line was lost and short outputs came back as bare `ok`. It now strips
+  **all** trailing CRs while still keeping the final frame of a genuine `\r`-redraw.
+  Fixed in both `tok.rs` and `tok.py`.
+- **Non-BMP characters dropped from rewritten commands.** The hand-rolled JSON
+  parser (`parse_json_string`, Rust) decoded `\uXXXX` per code unit, so a non-BMP
+  char sent as an ASCII-escaped UTF-16 **surrogate pair** (`🚀` → 🚀,
+  emoji and other astral chars) was silently dropped — corrupting e.g.
+  `git commit -m "🚀 release"`. Surrogate pairs are now combined. (Raw UTF-8 input
+  was already fine; `tok.py` uses `json` and was unaffected.)
+
+### Added
+- **PowerShell hook coverage on Windows.** `tok init` now installs a PreToolUse
+  matcher for the `PowerShell` tool in addition to `Bash`, so Claude Code on
+  Windows (which drives commands through a PowerShell tool) routes them through
+  tok too instead of bypassing it. `tok hook claude` was already tool-agnostic.
+
 ## [0.3.1] — 2026-06-14
 
 ### Fixed

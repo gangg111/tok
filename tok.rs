@@ -17,7 +17,7 @@ use std::sync::Mutex;
 static LAST_RAW: Mutex<String> = Mutex::new(String::new());
 static LAST_CODE: Mutex<i32> = Mutex::new(0);
 
-const VERSION: &str = "0.3.1";
+const VERSION: &str = "0.3.2";
 const HEAD_KEEP: usize = 12;
 const TAIL_KEEP: usize = 18;
 const LS_GROUP_MIN: usize = 200;
@@ -76,11 +76,14 @@ fn strip_ansi(s: &str) -> String {
 fn resolve_cr(s: &str) -> String {
     s.split('\n')
         .map(|l| {
-            // A trailing CR is a CRLF line terminator (cmd.exe, PowerShell, most
-            // native Windows tools) — strip it, do NOT treat it as a progress
-            // overwrite. Only a CR with content AFTER it is an in-line overwrite
+            // Trailing CR(s) are CRLF line terminators (cmd.exe, PowerShell, most
+            // native Windows tools) — strip them, do NOT treat them as a progress
+            // overwrite. Strip ALL trailing CRs, not just one: Windows tools that
+            // emit "\r\n" through a layer that re-adds "\r" produce "\r\r\n", and
+            // dropping only one CR left the line as an empty final frame → total
+            // content loss. Only a CR with content AFTER it is an in-line overwrite
             // (a `\r`-redrawn progress bar), where we keep the final segment.
-            let l = l.strip_suffix('\r').unwrap_or(l);
+            let l = l.trim_end_matches('\r');
             l.rsplit('\r').next().unwrap_or(l)
         })
         .collect::<Vec<_>>()
@@ -848,6 +851,7 @@ fn h_ls(args: &[String]) -> (String, i32) {
         paths.push(".".into());
     }
     let mut out: Vec<String> = Vec::new();
+    let mut err = false;
     for p in &paths {
         let p = if let Some(rest) = p.strip_prefix("~/") {
             format!("{}/{}", home(), rest)
@@ -862,6 +866,7 @@ fn h_ls(args: &[String]) -> (String, i32) {
             }
             Err(_) => {
                 out.push(format!("ls: {}: not found", p));
+                err = true;
                 continue;
             }
             _ => {}
@@ -870,6 +875,7 @@ fn h_ls(args: &[String]) -> (String, i32) {
             Ok(rd) => rd.flatten().collect(),
             Err(e) => {
                 out.push(format!("ls: {}", e));
+                err = true;
                 continue;
             }
         };
@@ -918,7 +924,7 @@ fn h_ls(args: &[String]) -> (String, i32) {
             out.push(line.trim_end_matches(',').to_string());
         }
     }
-    (out.join("\n"), 0)
+    (out.join("\n"), if err { 2 } else { 0 })
 }
 
 fn h_find(cmd: &[String]) -> (String, i32) {
@@ -1178,6 +1184,12 @@ fn h_git(cmd: &[String]) -> (String, i32) {
             let mut args: Vec<String> = vec!["git".into(), "-c".into(), "color.ui=false".into()];
             args.extend(cmd[1..].iter().cloned());
             let (raw, code) = run_raw(&args);
+            if code != 0 {
+                // diff failed (bad flag, bad revision, not a repo, …); the error is
+                // on stderr and is not a diff line, so the filter below would drop it
+                // and report a misleading "no diff". Surface the real error instead.
+                return (generic_filter(&raw, code, 80), code);
+            }
             if cmd.iter().any(|a| a == "--stat" || a == "--name-only" || a == "--name-status") {
                 return (generic_filter(&raw, code, 80), code);
             }
@@ -1699,7 +1711,27 @@ fn parse_json_string(s: &str) -> Option<String> {
                 'u' => {
                     let h: String = it.by_ref().take(4).collect();
                     if let Ok(n) = u32::from_str_radix(&h, 16) {
-                        if let Some(ch) = char::from_u32(n) {
+                        // Combine UTF-16 surrogate pairs (🚀 → 🚀); a lone
+                        // high surrogate is not a valid char and char::from_u32 would
+                        // drop it, silently losing every non-BMP char (emoji, …).
+                        let cp = if (0xD800..=0xDBFF).contains(&n) {
+                            let mut probe = it.clone();
+                            if probe.next() == Some('\\') && probe.next() == Some('u') {
+                                let h2: String = probe.by_ref().take(4).collect();
+                                match u32::from_str_radix(&h2, 16) {
+                                    Ok(lo) if (0xDC00..=0xDFFF).contains(&lo) => {
+                                        it = probe; // consume the low surrogate
+                                        Some(0x10000 + ((n - 0xD800) << 10) + (lo - 0xDC00))
+                                    }
+                                    _ => None,
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
+                            Some(n)
+                        };
+                        if let Some(ch) = cp.and_then(char::from_u32) {
                             out.push(ch);
                         }
                     }
@@ -2212,6 +2244,24 @@ mod tests {
         // a genuine in-line \r-redraw still collapses to the final frame
         assert_eq!(resolve_cr("10%\r50%\r100%"), "100%");
         assert_eq!(resolve_cr("downloading\r100%\r\n"), "100%\n");
+        // doubled CR ("\r\r\n", a Windows quirk) must NOT lose the line content
+        assert_eq!(resolve_cr("alpha\r\r\nbeta\r\r\n"), "alpha\nbeta\n");
+        assert_eq!(resolve_cr("x\r\r\r\n"), "x\n");
+        // a real redraw before a doubled-CR terminator still keeps the final frame
+        assert_eq!(resolve_cr("downloading\r100%\r\r\n"), "100%\n");
+    }
+
+    #[test]
+    fn parse_json_string_decodes_surrogate_pairs() {
+        // non-BMP chars sent as ASCII-escaped JSON arrive as a UTF-16 surrogate
+        // pair (🚀); they must round-trip, not be silently dropped.
+        assert_eq!(parse_json_string("\"\\ud83d\\ude80\""), Some("🚀".to_string()));
+        assert_eq!(parse_json_string("\"a\\ud83d\\ude80b\""), Some("a🚀b".to_string()));
+        // BMP \u escape still works; raw (unescaped) UTF-8 still works
+        assert_eq!(parse_json_string("\"\\u0105\""), Some("ą".to_string()));
+        assert_eq!(parse_json_string("\"🚀\""), Some("🚀".to_string()));
+        // a lone high surrogate (no low follower) is dropped; the rest survives
+        assert_eq!(parse_json_string("\"a\\ud83db\""), Some("ab".to_string()));
     }
 
     #[test]

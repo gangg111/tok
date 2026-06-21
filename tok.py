@@ -25,7 +25,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 CACHE_DIR = os.environ.get("TOK_CACHE") or os.path.join(
     os.path.expanduser("~"), ".cache", "tok")
 MAX_LINES = int(os.environ.get("TOK_MAX_LINES", "60"))
@@ -62,8 +62,10 @@ def resolve_cr(text):
     not a progress overwrite, so strip it first or the whole line is lost."""
     out = []
     for line in text.split("\n"):
-        if line.endswith("\r"):
-            line = line[:-1]
+        # Strip ALL trailing CRs (not just one): "\r\r\n" from Windows tools whose
+        # "\r\n" passes through a layer that re-adds "\r" would otherwise collapse
+        # to an empty final frame → total content loss.
+        line = line.rstrip("\r")
         if "\r" in line:
             line = line.split("\r")[-1]
         out.append(line)
@@ -254,6 +256,7 @@ def h_ls(args):
     show_hidden = any(a in ("-a", "-la", "-al", "-lah", "-A") for a in args)
     paths = [a for a in args if not a.startswith("-")] or ["."]
     out = []
+    err = False
     for p in paths:
         p = os.path.expanduser(p)
         if not os.path.isdir(p):
@@ -261,12 +264,14 @@ def h_ls(args):
                 out.append("%s %s" % (p, human(os.path.getsize(p))))
             else:
                 out.append("ls: %s: not found" % p)
+                err = True
                 continue
             continue
         try:
             entries = sorted(os.scandir(p), key=lambda e: e.name)
         except OSError as e:
             out.append("ls: %s" % e)
+            err = True
             continue
         dirs, files, total = [], [], 0
         for e in entries:
@@ -299,7 +304,7 @@ def h_ls(args):
             line += f + ","
         if line.strip(" ,"):
             out.append(line.rstrip(","))
-    return "\n".join(out), 0
+    return "\n".join(out), (2 if err else 0)
 
 
 def h_find(cmd):
@@ -834,16 +839,20 @@ def init_hook(argv):
                 return 1
     hooks = settings.setdefault("hooks", {})
     pre = hooks.setdefault("PreToolUse", [])
-    entry = {"matcher": "Bash", "hooks": [{"type": "command", "command": "tok hook claude"}]}
     if any("tok hook" in json.dumps(e) for e in pre):
         print("tok hook already installed in %s" % path)
         return 0
-    pre.append(entry)
+    # Claude Code drives shell commands through the Bash tool, and on Windows
+    # also through a PowerShell tool. Hook both so PowerShell-tool calls are
+    # proxied too (otherwise they bypass tok → 0% savings on that lane).
+    matchers = ["Bash"] + (["PowerShell"] if os.name == "nt" else [])
+    for m in matchers:
+        pre.append({"matcher": m, "hooks": [{"type": "command", "command": "tok hook claude"}]})
     if os.path.dirname(path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         json.dump(settings, f, indent=2)
-    print("tok hook installed → %s" % path)
+    print("tok hook installed (%s) → %s" % ("+".join(matchers), path))
     return 0
 
 
