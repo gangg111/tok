@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 static LAST_RAW: Mutex<String> = Mutex::new(String::new());
 static LAST_CODE: Mutex<i32> = Mutex::new(0);
 
-const VERSION: &str = "0.3.5";
+const VERSION: &str = "0.3.6";
 const HEAD_KEEP: usize = 12;
 const TAIL_KEEP: usize = 18;
 const LS_GROUP_MIN: usize = 200;
@@ -822,12 +822,14 @@ fn run_raw(cmd: &[String]) -> (String, i32) {
 }
 
 /// Write via tmp-file + rename so a concurrent reader (`tok full` in another
-/// agent window) never sees a half-written file. Windows rename won't replace,
-/// so best-effort remove first — the unreadable window shrinks to ~zero.
+/// agent window) never sees a half-written file. `fs::rename` atomically
+/// REPLACES an existing destination on Windows (MoveFileExW + REPLACE_EXISTING)
+/// and Unix alike, so we must NOT remove the target first: doing so opened a
+/// brief window where the file was absent and a concurrent reader got
+/// "no cached output" for a run whose raw was never actually lost.
 fn atomic_write(path: &str, data: &[u8]) {
     let tmp = format!("{}.tmp{}", path, std::process::id());
     if fs::write(&tmp, data).is_ok() {
-        let _ = fs::remove_file(path);
         if fs::rename(&tmp, path).is_err() {
             let _ = fs::write(path, data); // fallback: plain write
             let _ = fs::remove_file(&tmp);
@@ -1340,8 +1342,13 @@ fn h_grep(cmd: &[String]) -> (String, i32) {
             None => misc.push(cap_line(ln)),
         }
     }
-    // global grouping by content
-    let mut by_content: HashMap<String, Vec<(String, Vec<String>)>> = HashMap::new();
+    // global grouping by content. Each content-key maps to (file order, file ->
+    // line numbers). Dedup-by-file is an O(1) map lookup: a linear Vec scan here
+    // was O(files_per_key^2) when many files shared ONE identical matched line
+    // (a boilerplate/license/import line across a big tree) — a `grep -rn` over
+    // such a tree turned quadratic. The Python mirror already uses a dict.
+    let mut by_content: HashMap<String, (Vec<String>, HashMap<String, Vec<String>>)> =
+        HashMap::new();
     let mut corder: Vec<String> = Vec::new();
     let mut total_hits = 0usize;
     for f in &order {
@@ -1350,25 +1357,29 @@ fn h_grep(cmd: &[String]) -> (String, i32) {
             let key: String = c.chars().take(70).collect();
             let entry = by_content.entry(key.clone()).or_insert_with(|| {
                 corder.push(key.clone());
-                Vec::new()
+                (Vec::new(), HashMap::new())
             });
-            match entry.iter_mut().find(|(ef, _)| ef == f) {
-                Some((_, nums)) => nums.push(num.clone()),
-                None => entry.push((f.clone(), vec![num.clone()])),
+            match entry.1.get_mut(f) {
+                Some(nums) => nums.push(num.clone()),
+                None => {
+                    entry.0.push(f.clone());
+                    entry.1.insert(f.clone(), vec![num.clone()]);
+                }
             }
         }
     }
     let mut out: Vec<String> = Vec::new();
     for c in corder.iter().take(25) {
-        let locs = &by_content[c];
-        let mut loc_s: Vec<String> = locs.iter().take(30)
-            .map(|(f, nums)| {
+        let (forder, fmap) = &by_content[c];
+        let mut loc_s: Vec<String> = forder.iter().take(30)
+            .map(|f| {
+                let nums = &fmap[f];
                 let ns: Vec<&str> = nums.iter().take(8).map(|s| s.as_str()).collect();
                 format!("{}:{}", f, ns.join(","))
             })
             .collect();
-        if locs.len() > 30 {
-            loc_s.push(format!("...+{} files", locs.len() - 30));
+        if forder.len() > 30 {
+            loc_s.push(format!("...+{} files", forder.len() - 30));
         }
         out.push(format!("{} <- {}", c, loc_s.join(" ")));
     }
@@ -1409,7 +1420,13 @@ fn group_paths(items: &[String]) -> Vec<String> {
     if items.len() <= 8 {
         return items.to_vec();
     }
-    let mut groups: Vec<(String, Vec<&String>)> = Vec::new();
+    // key -> members, plus first-seen key order for deterministic output. A
+    // linear `groups.iter_mut().find()` per item was O(items * distinct_groups):
+    // a flat monorepo (each modified file in its own top-level package,
+    // "pkgNNNN/index.ts" → 2 segments → every path is its own key) drove
+    // git status quadratic. The map lookup is O(1) amortized.
+    let mut groups: HashMap<String, Vec<&String>> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
     for it in items {
         let path = it.rsplit(' ').next().unwrap_or(it);
         let segs: Vec<&str> = path.split('/').collect();
@@ -1418,15 +1435,16 @@ fn group_paths(items: &[String]) -> Vec<String> {
         } else {
             it.clone()
         };
-        match groups.iter_mut().find(|(k, _)| *k == key) {
-            Some((_, v)) => v.push(it),
-            None => groups.push((key, vec![it])),
-        }
+        groups.entry(key.clone()).or_insert_with(|| {
+            order.push(key.clone());
+            Vec::new()
+        }).push(it);
     }
     let mut out: Vec<String> = Vec::new();
-    for (key, members) in groups {
+    for key in &order {
+        let members = &groups[key];
         if members.len() <= 2 {
-            out.extend(members.into_iter().cloned());
+            out.extend(members.iter().map(|s| (*s).clone()));
         } else {
             out.push(format!("{}/... x{}", key, members.len()));
         }
@@ -1753,9 +1771,21 @@ fn read_text_flex(p: &str) -> std::io::Result<String> {
     // BOM-less UTF-16LE heuristic MUST run before the UTF-8 attempt: ASCII text
     // in UTF-16LE ("P\0S\0…") is *valid* UTF-8 with embedded NULs, so a
     // from_utf8-first order would "succeed" and return NUL-riddled garbage.
+    // Raw NUL fraction alone is too weak a signal: a genuine UTF-8 log with a
+    // NUL-padded or sparse tail (preallocated / crash-truncated logs, ring
+    // buffers) can exceed a third NULs yet be perfectly good text — decoding it
+    // as UTF-16LE turns every ASCII pair into a CJK code point and destroys the
+    // readable text, ERROR/FATAL lines included. Real UTF-16LE ASCII has its
+    // NULs almost exclusively at ODD byte offsets (each char is [low, 0x00]);
+    // a contiguous NUL run straddles both parities, so it shows plenty of
+    // even-offset NULs. Require the odd-offset dominance before committing.
     let nuls = bytes.iter().filter(|b| **b == 0).count();
     if bytes.len() >= 4 && nuls * 3 > bytes.len() {
-        return Ok(utf16(&bytes, true));
+        let odd_nuls = bytes.iter().skip(1).step_by(2).filter(|b| **b == 0).count();
+        let even_nuls = nuls - odd_nuls;
+        if odd_nuls > even_nuls.saturating_mul(9) {
+            return Ok(utf16(&bytes, true));
+        }
     }
     match String::from_utf8(bytes) {
         Ok(s) => Ok(s),
@@ -1978,14 +2008,108 @@ const REWRITABLE: &[&str] = &[
 
 /// Extract the byte range of the `"tool_input": { ... }` object
 /// (transcript files use `"input"` instead).
-fn tool_input_range(j: &str) -> Option<(usize, usize)> {
-    let key = j.find("\"tool_input\"").or_else(|| j.find("\"input\""))?;
-    let open = j[key..].find('{')? + key;
+/// Byte offset of the opening quote of a TOP-LEVEL (depth-1) string key named
+/// `key` in the root JSON object `j`. String- and depth-aware, so a `"key"`
+/// nested inside a decoy sibling's value or sub-object is never mistaken for
+/// the real top-level key. Returns None if absent or if `j` has no object.
+fn top_level_key_pos(j: &str, key: &str) -> Option<usize> {
     let b = j.as_bytes();
+    let mut i = 0;
+    while i < b.len() && b[i] != b'{' {
+        i += 1;
+    }
+    if i >= b.len() {
+        return None;
+    }
+    i += 1;
+    let mut depth = 1usize;
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                let start = i;
+                i += 1;
+                while i < b.len() {
+                    if b[i] == b'\\' {
+                        i += 2;
+                        continue;
+                    }
+                    if b[i] == b'"' {
+                        break;
+                    }
+                    i += 1;
+                }
+                if i >= b.len() {
+                    return None; // unterminated string
+                }
+                let content_end = i; // index of the closing quote
+                i += 1;
+                if depth == 1 {
+                    // a key only if the next non-space byte is ':'
+                    let mut jx = i;
+                    while jx < b.len() && (b[jx] as char).is_ascii_whitespace() {
+                        jx += 1;
+                    }
+                    if jx < b.len() && b[jx] == b':' && &j[start + 1..content_end] == key {
+                        return Some(start);
+                    }
+                }
+                continue; // i already past the string
+            }
+            b'{' | b'[' => depth += 1,
+            b'}' | b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Brace-matched range of the OBJECT value of the top-level `tool_input`
+/// (or `input`) key. The anchor is located depth-aware: a `"tool_input"`
+/// nested inside a decoy sibling — `{"decoy":{"tool_input":{...}},"tool_input":
+/// {...}}` — must NOT hijack the rewrite (the 0.3.5 "never rewrite a nested
+/// command" guarantee applies to the object locator too, not just the command
+/// value). The value must be an object; anything else declines (no rewrite).
+fn tool_input_range(j: &str) -> Option<(usize, usize)> {
+    let kpos = top_level_key_pos(j, "tool_input")
+        .or_else(|| top_level_key_pos(j, "input"))?;
+    let b = j.as_bytes();
+    // skip the key string, its ':' and any whitespace to the value's first byte
+    let mut i = kpos + 1;
+    while i < b.len() {
+        if b[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if b[i] == b'"' {
+            break;
+        }
+        i += 1;
+    }
+    i += 1; // past the closing quote of the key
+    while i < b.len() && (b[i] as char).is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= b.len() || b[i] != b':' {
+        return None;
+    }
+    i += 1;
+    while i < b.len() && (b[i] as char).is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= b.len() || b[i] != b'{' {
+        return None; // value is not an object → nothing to splice
+    }
+    let open = i;
     let mut depth = 0usize;
     let mut in_str = false;
     let mut esc = false;
-    for (i, &c) in b.iter().enumerate().skip(open) {
+    for (k, &c) in b.iter().enumerate().skip(open) {
         if in_str {
             if esc {
                 esc = false;
@@ -2002,7 +2126,7 @@ fn tool_input_range(j: &str) -> Option<(usize, usize)> {
             b'}' => {
                 depth -= 1;
                 if depth == 0 {
-                    return Some((open, i + 1));
+                    return Some((open, k + 1));
                 }
             }
             _ => {}
@@ -3070,6 +3194,86 @@ mod tests {
     #[test]
     fn grep_like_norm_does_not_merge_distinct_text() {
         assert_ne!(norm_line("fn alpha()"), norm_line("fn beta()"));
+    }
+
+    #[test]
+    fn tool_input_range_ignores_nested_decoy() {
+        // 0.3.6 round-two: a decoy sibling that nests its own "tool_input" object
+        // BEFORE the real top-level one must not hijack the rewrite — the object
+        // locator has to be depth-aware just like the command-value finder.
+        let input =
+            r#"{"decoy":{"tool_input":{"command":"git log"}},"tool_input":{"command":"npm test"}}"#;
+        let (_, _, cmd) = claude_style_command(input).unwrap();
+        assert_eq!(cmd, "npm test"); // real command, not the nested "git log" decoy
+        // top-level "tool_input" located directly is unaffected
+        let flat = r#"{"tool_name":"Bash","tool_input":{"command":"cargo build"}}"#;
+        assert_eq!(claude_style_command(flat).unwrap().2, "cargo build");
+        // "input" alias still works
+        let alias = r#"{"tool_name":"Bash","input":{"command":"git diff"}}"#;
+        assert_eq!(claude_style_command(alias).unwrap().2, "git diff");
+        // a non-object tool_input value must decline (no rewrite), not splice a
+        // later sibling object
+        assert!(tool_input_range(r#"{"tool_input":"n/a","meta":{"command":"x"}}"#).is_none());
+        // top_level_key_pos ignores a nested key of the same name
+        let nested = r#"{"a":{"tool_input":1},"tool_input":2}"#;
+        let p = top_level_key_pos(nested, "tool_input").unwrap();
+        assert_eq!(&nested[p..p + 12], "\"tool_input\"");
+        assert!(p > nested.find("\"a\"").unwrap()); // the SECOND (top-level) one
+    }
+
+    #[test]
+    fn group_paths_flat_monorepo_and_nested() {
+        // deep paths sharing a 2-level prefix collapse to one "prefix/... xN"
+        let deep: Vec<String> =
+            (0..20).map(|i| format!("M src/core/f{}.rs", i)).collect();
+        let g = group_paths(&deep);
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0], "src/core/... x20");
+        // flat 2-segment paths each become their own key: every entry survives
+        // verbatim (and the pass is O(n), not the old O(n^2) linear-scan group)
+        let flat: Vec<String> =
+            (0..20).map(|i| format!("M pkg{:03}/index.ts", i)).collect();
+        let gf = group_paths(&flat);
+        assert_eq!(gf.len(), 20);
+        assert!(gf.contains(&"M pkg000/index.ts".to_string()));
+        assert!(gf.contains(&"M pkg019/index.ts".to_string()));
+        // <=8 items returned as-is
+        let few: Vec<String> = (0..3).map(|i| format!("M a/b/c{}.rs", i)).collect();
+        assert_eq!(group_paths(&few), few);
+    }
+
+    #[test]
+    fn read_text_flex_nul_tail_utf8_not_utf16() {
+        use std::io::Write;
+        let dir = std::env::temp_dir();
+        // (a) genuine UTF-8 log with a trailing NUL run (>1/3 NULs, but the NULs
+        // straddle both byte parities) MUST stay UTF-8 — the readable ERROR text
+        // survives instead of being mojibake'd as UTF-16LE.
+        let p1 = dir.join(format!("tok_nultail_{}.log", std::process::id()));
+        let mut body = Vec::new();
+        for _ in 0..8 {
+            body.extend_from_slice(b"ERROR Segmentation fault in libfoo\n");
+        }
+        body.extend(std::iter::repeat(0u8).take(400));
+        std::fs::File::create(&p1).unwrap().write_all(&body).unwrap();
+        let got = read_text_flex(p1.to_str().unwrap()).unwrap();
+        assert!(got.contains("Segmentation fault"), "NUL-tail UTF-8 must decode as UTF-8");
+        let _ = std::fs::remove_file(&p1);
+        // (b) genuine BOM-less UTF-16LE ASCII (NULs at ODD offsets) STILL decodes
+        let p2 = dir.join(format!("tok_u16_{}.log", std::process::id()));
+        let mut u16b = Vec::new();
+        for &c in b"HELLO world from powershell" {
+            u16b.push(c);
+            u16b.push(0);
+        }
+        std::fs::File::create(&p2).unwrap().write_all(&u16b).unwrap();
+        assert_eq!(read_text_flex(p2.to_str().unwrap()).unwrap(), "HELLO world from powershell");
+        let _ = std::fs::remove_file(&p2);
+        // (c) minimal "AB\0\0": ASCII with a short NUL tail, not UTF-16
+        let p3 = dir.join(format!("tok_ab_{}.bin", std::process::id()));
+        std::fs::File::create(&p3).unwrap().write_all(b"AB\x00\x00").unwrap();
+        assert!(read_text_flex(p3.to_str().unwrap()).unwrap().starts_with("AB"));
+        let _ = std::fs::remove_file(&p3);
     }
 }
 
