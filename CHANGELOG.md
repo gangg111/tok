@@ -4,6 +4,73 @@ All notable changes to **tok** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); tok follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.6] — 2026-07-05
+
+Round-two adversarial heavy-load audit: six attack surfaces (complexity/perf,
+crash-panic, encoding, hook-splice, cache concurrency, process/timeout), each
+finding reproduced live and independently verified. Five defects found and
+fixed; two candidates refuted as adversarial-only/intended. Every fix proven
+before/after; output on normal input is byte-identical.
+
+### Fixed
+- **`tok cat`/`read` corrupted NUL-dense UTF-8 as UTF-16LE (data loss).** The
+  BOM-less UTF-16LE heuristic keyed only on raw NUL fraction (>1/3 NULs), so a
+  genuine UTF-8 log with a NUL-padded or sparse tail — preallocated /
+  crash-truncated logs, ring buffers — was force-decoded as UTF-16LE, turning
+  every ASCII pair into a CJK code point and **erasing the readable text,
+  ERROR/FATAL lines included** (and `tok full` served the same poisoned buffer).
+  Real UTF-16LE ASCII puts its NULs almost exclusively at *odd* byte offsets
+  (each char is `[low, 0x00]`); a contiguous NUL run straddles both parities.
+  The heuristic now requires that odd-offset dominance, so a NUL-tailed UTF-8
+  file stays UTF-8. Genuine PowerShell UTF-16LE logs still decode. (Native path
+  only; `tok.py` has no such heuristic.)
+- **Concurrent `tok full` could report "no cached output" mid-write (data
+  loss).** `atomic_write` did `remove_file(path)` *before* `rename(tmp, path)`
+  on a mistaken "Windows rename won't replace" assumption, opening a window in
+  which the target was absent; a concurrent reader (the documented multi-window
+  raw-recovery path) hit it on ~0.5–1 % of reads and got unrecoverable
+  "no cached output" for a run whose raw was never lost. `fs::rename` already
+  atomically replaces the destination on Windows (MoveFileExW + REPLACE_EXISTING)
+  and Unix, so the pre-remove is gone and the window with it.
+- **Hook rewrote a NESTED decoy `tool_input`, not the real one (correctness).**
+  The 0.3.5 fix made the *command-value* finder depth-aware but the *object*
+  locator (`tool_input_range`) still used a naive `str::find("\"tool_input\"")`,
+  so an envelope nesting a decoy — `{"decoy":{"tool_input":{"command":"git log"}},
+  "tool_input":{"command":"npm test"}}` — had the decoy rewritten and the real
+  top-level command silently dropped, diverging from the `tok.py` reference. The
+  locator is now depth-aware (top-level key only) and requires the value to be an
+  object (a non-object `tool_input` declines instead of splicing a later
+  sibling). Adversarial-only shape, but it defeated the 0.3.5 "never rewrite a
+  nested/decoy command" guarantee. `tok.rs` and `tok.py` now agree.
+- **`grep` post-processing was O(n²) when many files share one matched line.**
+  `h_grep`'s content grouping deduped files per content-key with a linear
+  `Vec::find`, so a `grep -rn` over a big tree where thousands of files carry the
+  same boilerplate/license/import line went quadratic (isolated tok overhead:
+  1.6 s at 40k files, 6.0 s at 80k). Now a filename-keyed map + insertion-order
+  list — O(1) amortized (overhead ~0 s at 80k), output unchanged. (Matches the
+  `tok.py` dict, which never had the bug.)
+- **`git status` path grouping was O(n²) on a flat monorepo.** `group_paths`
+  found each group with a linear `Vec::find`; a flat-package layout
+  (`pkgNNNN/index.ts` → 2-segment paths → every path its own group) drove the
+  grouping quadratic on a large dirty tree. Now a `HashMap` + insertion-order
+  `Vec`, O(n), output unchanged.
+
+## [0.3.5] — 2026-07-04
+
+### Fixed
+- **Hook rewrote a NESTED `command`, not the real one.** The hand-rolled JSON
+  splice located the command field with a plain substring search for
+  `"command"`, so a `tool_input` that nested an object with its own `command`
+  key — `{"opts":{"command":"git log"},"command":"git status"}` — had the
+  *nested* value rewritten (→ `"opts":{"command":"tok git log"}`) while the
+  real top-level command was left un-proxied. The finder is now depth- and
+  string-aware: `command` is matched only as a **top-level** key of
+  `tool_input`, and the Antigravity path (`toolCall.args.CommandLine`, one
+  level down) matches the first genuine *key* rather than any substring — a
+  sibling whose string *value* happens to be the word `command` can no longer
+  win. Found by an adversarial hook-envelope fuzz (13 crafted cases), proven
+  live before/after. (`tok.py` parses with `json`, so it was never affected.)
+
 ## [0.3.4] — 2026-07-04
 
 Heavy-load audit: a 36-check battery of adversarial real-command tests plus a
