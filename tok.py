@@ -21,22 +21,26 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
 import time
 
-VERSION = "0.3.3"
+VERSION = "0.3.4"
 CACHE_DIR = os.environ.get("TOK_CACHE") or os.path.join(
     os.path.expanduser("~"), ".cache", "tok")
 MAX_LINES = int(os.environ.get("TOK_MAX_LINES", "60"))
+MAX_LINE_CHARS = int(os.environ.get("TOK_MAX_LINE_CHARS", "2000"))
 HEAD_KEEP = 12
 TAIL_KEEP = 18
 LS_GROUP_MIN = 200
 LS_DIR_KEEP = 40
 
 # ── regexes ──────────────────────────────────────────────────────────
-ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][AB0]")
+# OSC accepts BEL *or* ST (ESC \) terminators — hyperlinks (OSC 8) and window
+# titles use ST; the BEL-only pattern could swallow output up to a LATER BEL.
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]{0,4096}(?:\x07|\x1b\\)?|\x1b[()][AB0]")
 IMPORTANT_RE = re.compile(
     r"(?i)\b(error|failed|failure|fatal|panic|exception|traceback|abort"
     r"|denied|refused|cannot|unable|missing|not found|undefined|unresolved"
@@ -101,6 +105,10 @@ def generic_filter(raw, exit_code=0, max_lines=None):
     blank = False
     for ln in lines:
         s = ln.rstrip()
+        # cap line LENGTH — one 10 MB minified/base64 line must not become a
+        # token bomb; the full line stays recoverable via `tok full`.
+        if len(s) > MAX_LINE_CHARS:
+            s = "%s...(+%d chars) [tok full]" % (s[:MAX_LINE_CHARS], len(s) - MAX_LINE_CHARS)
         if not s.strip():
             blank = True
             continue
@@ -236,14 +244,29 @@ def cap_list(items, keep):
 def ls_ext_groups(files):
     groups, order = {}, []
     for name, sz in files:
-        stem, _, ext = name.rpartition(".")
-        ext = ext.lower() if stem and ext else "noext"
+        rest, ext = name, "noext"
+        # skip pure-numeric extensions (rotated logs app.log.1 … app.log.N)
+        for _ in range(3):
+            stem, _, e = rest.rpartition(".")
+            if stem and e:
+                if e.isdigit():
+                    rest, ext = stem, "numbered"
+                    continue
+                ext = e.lower()
+            break
         if ext not in groups:
             groups[ext] = [0, 0]
             order.append(ext)
         groups[ext][0] += 1
         groups[ext][1] += sz
     order.sort(key=lambda e: (-groups[e][0], e))
+    if len(order) > 30:
+        extra = order[30:]
+        n_files = sum(groups[e][0] for e in extra)
+        n_sz = sum(groups[e][1] for e in extra)
+        out = ["%s:%d:%s" % (e, groups[e][0], human(groups[e][1])) for e in order[:30]]
+        out.append("+%d more exts:%d:%s" % (len(extra), n_files, human(n_sz)))
+        return out
     return [
         "%s:%d:%s" % (e, groups[e][0], human(groups[e][1]))
         if groups[e][1] >= 1024
@@ -346,6 +369,8 @@ def h_grep(cmd):
             continue
         m = re.match(r"^(.{1,200}?):(\d+):(.*)$", ln)
         if not m:
+            if len(ln) > MAX_LINE_CHARS:  # bare minified match = token bomb
+                ln = "%s...(+%d chars) [tok full]" % (ln[:MAX_LINE_CHARS], len(ln) - MAX_LINE_CHARS)
             misc.append(ln)
             continue
         f, num, content = m.group(1), m.group(2), m.group(3).strip()
@@ -375,8 +400,12 @@ def h_grep(cmd):
     if len(corder) > 25:
         out.append("...+%d distinct matches [tok full]" % (len(corder) - 25))
     out.extend(misc[:10])
+    if len(misc) > 10:
+        out.append("...+%d more lines [tok full]" % (len(misc) - 10))
     if order:
         out.insert(0, "%d matches in %d files" % (sum(len(v) for v in groups.values()), len(order)))
+    elif misc:
+        out.insert(0, "%d unparsed match lines" % len(misc))
     text = "\n".join(out)
     lines = text.split("\n")
     if len(lines) > 100:
@@ -569,17 +598,48 @@ def run_raw(cmd):
     # on the DIRECT child, then take what was read (capped). close_fds=True
     # (Python's default) already stops the grandchild from inheriting our own
     # stdout, so a parent capturing tok's output still gets EOF when tok exits.
+    def spawn(argv):
+        return subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        proc = spawn(cmd)
     except FileNotFoundError:
-        LAST.update(raw="%s: command not found" % cmd[0], code=127)
-        return {"out": "%s: command not found" % cmd[0], "code": 127}
-    chunks = []
+        # Windows: .cmd/.bat shims (npm, npx, every npm-installed global) are
+        # not resolved by CreateProcess — probe PATHEXT via shutil.which.
+        resolved = shutil.which(cmd[0])
+        if resolved and os.path.normcase(resolved) != os.path.normcase(cmd[0]):
+            try:
+                proc = spawn([resolved] + list(cmd[1:]))
+            except OSError as e:
+                msg = "%s: spawn failed: %s" % (cmd[0], e)
+                LAST.update(raw=msg, code=126)
+                return {"out": msg, "code": 126}
+        else:
+            LAST.update(raw="%s: command not found" % cmd[0], code=127)
+            return {"out": "%s: command not found" % cmd[0], "code": 127}
+    except OSError as e:
+        # PermissionError, bad exe format… — "command not found" would be a lie
+        msg = "%s: spawn failed: %s" % (cmd[0], e)
+        LAST.update(raw=msg, code=126)
+        return {"out": msg, "code": 126}
+    # bounded capture: head+tail halves — unbounded buffers let a multi-GB
+    # output OOM the process; errors are early, summaries late, so keep both
+    half = int(os.environ.get("TOK_MAX_RAW_MB", "64")) * 1024 * 1024 // 2
+    head, tail, state = [], [], {"hlen": 0, "tlen": 0, "dropped": 0}
 
     def _drain():
         try:
             for chunk in iter(lambda: proc.stdout.read(8192), b""):
-                chunks.append(chunk)
+                if state["hlen"] < half:
+                    head.append(chunk)
+                    state["hlen"] += len(chunk)
+                else:
+                    tail.append(chunk)
+                    state["tlen"] += len(chunk)
+                    while state["tlen"] > half and tail:
+                        state["dropped"] += len(tail[0])
+                        state["tlen"] -= len(tail[0])
+                        tail.pop(0)
         except Exception:
             pass
 
@@ -587,7 +647,11 @@ def run_raw(cmd):
     t.start()
     proc.wait()
     t.join(2.0)  # readers finish at once normally; a daemon holding the pipe caps here
-    out = b"".join(chunks).decode("utf-8", "replace")
+    out = b"".join(head).decode("utf-8", "replace")
+    if state["dropped"]:
+        out += "\n...[tok: %d captured bytes omitted here]...\n" % state["dropped"]
+    if tail:
+        out += b"".join(tail).decode("utf-8", "replace")
     LAST.update(raw=out, code=proc.returncode)
     return {"out": out, "code": proc.returncode}
 
@@ -626,10 +690,20 @@ def current_session():
 def track(cmd, raw, filtered):
     try:
         os.makedirs(CACHE_DIR, exist_ok=True)
-        with open(os.path.join(CACHE_DIR, "stats.jsonl"), "a") as f:
+        path = os.path.join(CACHE_DIR, "stats.jsonl")
+        with open(path, "a") as f:
             f.write(json.dumps({"cmd": cmd[0] if cmd else "?", "ts": int(time.time()),
                                 "sid": current_session(),
                                 "in": count_tokens(raw), "out": count_tokens(filtered)}) + "\n")
+        # bounded footprint (parity with tok.rs): trim lazily at ~512 KB via
+        # tmp+replace so a concurrent appender never loses its line
+        if os.path.getsize(path) > 524288:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                lines = f.read().splitlines()
+            tmp = path + ".tmp%d" % os.getpid()
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines[len(lines) // 2:]) + "\n")
+            os.replace(tmp, path)
     except OSError:
         pass
 
@@ -914,9 +988,13 @@ def main():
         print("tok %s" % VERSION)
         return 0
     if argv[0] == "full":
+        if len(argv) > 1:
+            # the Rust binary keeps a 20-run ring; the fallback does not — say
+            # so instead of silently printing the WRONG run's output
+            print("tok.py fallback: no history ring — showing the LAST run only")
         p = os.path.join(CACHE_DIR, "last.txt")
         if os.path.exists(p):
-            sys.stdout.write(open(p).read())
+            sys.stdout.write(open(p, encoding="utf-8", errors="replace").read())
         else:
             print("no cached output")
         return 0

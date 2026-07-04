@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 static LAST_RAW: Mutex<String> = Mutex::new(String::new());
 static LAST_CODE: Mutex<i32> = Mutex::new(0);
 
-const VERSION: &str = "0.3.3";
+const VERSION: &str = "0.3.4";
 const HEAD_KEEP: usize = 12;
 const TAIL_KEEP: usize = 18;
 const LS_GROUP_MIN: usize = 200;
@@ -37,6 +37,24 @@ fn max_lines_default() -> usize {
     env::var("TOK_MAX_LINES").ok().and_then(|v| v.parse().ok()).unwrap_or(60)
 }
 
+fn max_line_chars() -> usize {
+    env::var("TOK_MAX_LINE_CHARS").ok().and_then(|v| v.parse().ok()).unwrap_or(2000)
+}
+
+/// Cap a single line's LENGTH. Filters cap the line COUNT, but one 10 MB line
+/// (minified JS/JSON, a base64 blob) would otherwise sail through untouched —
+/// a token bomb for the exact tool meant to prevent them. Char-safe; the full
+/// line stays recoverable via `tok full`.
+fn cap_line(s: &str) -> String {
+    let cap = max_line_chars();
+    let n = s.chars().count();
+    if n <= cap {
+        return s.to_string();
+    }
+    let cut: String = s.chars().take(cap).collect();
+    format!("{}...(+{} chars) [tok full]", cut, n - cap)
+}
+
 // ── text helpers ─────────────────────────────────────────────────────
 
 fn strip_ansi(s: &str) -> String {
@@ -47,17 +65,34 @@ fn strip_ansi(s: &str) -> String {
             match it.peek() {
                 Some('[') => {
                     it.next();
+                    // CSI: consume to the alphabetic final byte, but cap the scan —
+                    // malformed input must not eat the rest of the stream.
+                    let mut scanned = 0usize;
                     while let Some(&d) = it.peek() {
                         it.next();
-                        if d.is_ascii_alphabetic() {
+                        scanned += 1;
+                        if d.is_ascii_alphabetic() || scanned > 256 {
                             break;
                         }
                     }
                 }
                 Some(']') => {
                     it.next();
-                    for d in it.by_ref() {
-                        if d == '\u{7}' {
+                    // OSC terminates with BEL *or* ST (ESC \) — hyperlinks (OSC 8),
+                    // window titles and CI logs use the ST form; scanning for BEL
+                    // only used to swallow ALL remaining output (errors included).
+                    // Scan is capped so a truncated OSC can't eat the stream.
+                    let mut scanned = 0usize;
+                    while let Some(&d) = it.peek() {
+                        it.next();
+                        scanned += 1;
+                        if d == '\u{7}' || scanned > 4096 {
+                            break;
+                        }
+                        if d == '\u{1b}' {
+                            if it.peek() == Some(&'\\') {
+                                it.next(); // consume the ST backslash
+                            }
                             break;
                         }
                     }
@@ -293,7 +328,10 @@ fn generic_filter(raw: &str, code: i32, max_lines: usize) -> String {
     let mut kept: Vec<(String, usize)> = Vec::new();
     let mut blank = false;
     for ln in text.split('\n') {
-        let s = ln.trim_end();
+        // cap line LENGTH first — one 10 MB minified line must not become a
+        // token bomb; every later step then works on the capped form.
+        let s_owned = cap_line(ln.trim_end());
+        let s = s_owned.as_str();
         if s.trim().is_empty() {
             blank = true;
             continue;
@@ -311,7 +349,7 @@ fn generic_filter(raw: &str, code: i32, max_lines: usize) -> String {
             kept.push((String::new(), 1));
         }
         blank = false;
-        kept.push((s.to_string(), 1));
+        kept.push((s_owned, 1));
     }
     let mut out_lines: Vec<String> = kept
         .into_iter()
@@ -601,6 +639,84 @@ fn set_std_inherit(inherit: bool) {
 #[cfg(not(windows))]
 fn set_std_inherit(_inherit: bool) {}
 
+/// Bounded capture: head + tail with an omission marker. An unbounded Vec let
+/// a multi-GB output drive tok to alloc-abort (which catch_unwind can NOT
+/// catch) — the agent then got nothing at all. Errors are usually early
+/// (head) and summaries late (tail), so both survive the cap.
+struct CapBuf {
+    head: Vec<u8>,
+    tail: std::collections::VecDeque<u8>,
+    half: usize,
+    dropped: u64,
+}
+
+impl CapBuf {
+    fn new(half: usize) -> Self {
+        CapBuf { head: Vec::new(), tail: std::collections::VecDeque::new(), half, dropped: 0 }
+    }
+    fn push(&mut self, chunk: &[u8]) {
+        let mut rest = chunk;
+        if self.head.len() < self.half {
+            let take = (self.half - self.head.len()).min(rest.len());
+            self.head.extend_from_slice(&rest[..take]);
+            rest = &rest[take..];
+        }
+        if !rest.is_empty() {
+            self.tail.extend(rest.iter().copied());
+            if self.tail.len() > self.half {
+                let over = self.tail.len() - self.half;
+                self.tail.drain(..over);
+                self.dropped += over as u64;
+            }
+        }
+    }
+    fn len(&self) -> usize {
+        self.head.len() + self.tail.len()
+    }
+    fn merge(&self) -> String {
+        let mut s = String::from_utf8_lossy(&self.head).into_owned();
+        if self.dropped > 0 {
+            s.push_str(&format!("\n...[tok: {} captured bytes omitted here]...\n",
+                                self.dropped));
+        }
+        if !self.tail.is_empty() {
+            let t: Vec<u8> = self.tail.iter().copied().collect();
+            s.push_str(&String::from_utf8_lossy(&t));
+        }
+        s
+    }
+}
+
+fn max_raw_half() -> usize {
+    let mb = env::var("TOK_MAX_RAW_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(64usize);
+    mb.max(2) * 1024 * 1024 / 2
+}
+
+/// Windows PATH probe for .cmd/.bat shims. Rust's Command resolves only .exe,
+/// but npm, npx, pnpm, tsc, eslint and every npm-installed global are .cmd
+/// shims — without this, the hook turned WORKING commands into exit-127
+/// failures ("npm: command not found" while npm works natively).
+#[cfg(windows)]
+fn resolve_shim(name: &str) -> Option<String> {
+    if name.contains('.') || name.contains('/') || name.contains('\\') {
+        return None; // has extension or is a path — std already handled it
+    }
+    let path = env::var("PATH").unwrap_or_default();
+    for dir in path.split(';').filter(|d| !d.is_empty()) {
+        for ext in [".cmd", ".bat"] {
+            let cand = format!("{}\\{}{}", dir.trim_end_matches('\\'), name, ext);
+            if fs::metadata(&cand).map(|m| m.is_file()).unwrap_or(false) {
+                return Some(cand);
+            }
+        }
+    }
+    None
+}
+#[cfg(not(windows))]
+fn resolve_shim(_name: &str) -> Option<String> {
+    None
+}
+
 fn run_raw(cmd: &[String]) -> (String, i32) {
     // We deliberately avoid Command::output(): it reads stdout/stderr to EOF, and
     // a command that leaves a persistent grandchild holding a pipe write-end (the
@@ -608,18 +724,32 @@ fn run_raw(cmd: &[String]) -> (String, i32) {
     // drain the pipes on threads, wait on the DIRECT child, then take whatever was
     // read once output goes quiet. We also flip our own std handles non-inheritable
     // across the spawn so that grandchild can't inherit the agent's pipe (above).
-    set_std_inherit(false);
-    let spawned = Command::new(&cmd[0])
-        .args(&cmd[1..])
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
-    set_std_inherit(true);
+    let spawn_with = |program: &str| {
+        set_std_inherit(false);
+        let r = Command::new(program)
+            .args(&cmd[1..])
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+        set_std_inherit(true);
+        r
+    };
+    let spawned = match spawn_with(&cmd[0]) {
+        Ok(c) => Ok(c),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            match resolve_shim(&cmd[0]) {
+                Some(shim) => spawn_with(&shim), // .cmd/.bat found on PATH
+                None => Err(e),
+            }
+        }
+        Err(e) => Err(e),
+    };
     let (s, code) = match spawned {
         Ok(mut child) => {
-            let out_buf = Arc::new(Mutex::new(Vec::<u8>::new()));
-            let err_buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+            let half = max_raw_half();
+            let out_buf = Arc::new(Mutex::new(CapBuf::new(half)));
+            let err_buf = Arc::new(Mutex::new(CapBuf::new(half)));
             let mut so = child.stdout.take();
             let mut se = child.stderr.take();
             let ob = out_buf.clone();
@@ -630,7 +760,7 @@ fn run_raw(cmd: &[String]) -> (String, i32) {
                         if n == 0 {
                             break;
                         }
-                        ob.lock().unwrap().extend_from_slice(&tmp[..n]);
+                        ob.lock().unwrap().push(&tmp[..n]);
                     }
                 }
             });
@@ -642,15 +772,16 @@ fn run_raw(cmd: &[String]) -> (String, i32) {
                         if n == 0 {
                             break;
                         }
-                        eb.lock().unwrap().extend_from_slice(&tmp[..n]);
+                        eb.lock().unwrap().push(&tmp[..n]);
                     }
                 }
             });
             let code = child.wait().ok().and_then(|st| st.code()).unwrap_or(1);
             // Direct child has exited → all ITS output is now in the pipes. Readers
             // reach EOF (finish) once every write-end closes; a daemon keeps one
-            // open, so also stop once the captured bytes go quiet (drain complete),
-            // with a generous hard cap as a final backstop.
+            // open, so also stop once the captured bytes go quiet — a 1 s window,
+            // so a detached worker's last words (an error half a second after the
+            // wrapper exits) still land in the capture — with a hard-cap backstop.
             let hard = Instant::now() + Duration::from_secs(10);
             let mut last = 0usize;
             let mut quiet = Instant::now();
@@ -663,16 +794,23 @@ fn run_raw(cmd: &[String]) -> (String, i32) {
                     last = n;
                     quiet = Instant::now();
                 }
-                if quiet.elapsed() >= Duration::from_millis(200) || Instant::now() >= hard {
+                if quiet.elapsed() >= Duration::from_millis(1000) || Instant::now() >= hard {
                     break;
                 }
                 thread::sleep(Duration::from_millis(10));
             }
-            let mut s = String::from_utf8_lossy(&out_buf.lock().unwrap()).into_owned();
-            s.push_str(&String::from_utf8_lossy(&err_buf.lock().unwrap()));
+            let mut s = out_buf.lock().unwrap().merge();
+            s.push_str(&err_buf.lock().unwrap().merge());
             (s, code)
         }
-        Err(_) => (format!("{}: command not found", cmd[0]), 127),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            (format!("{}: command not found", cmd[0]), 127)
+        }
+        Err(e) => {
+            // PermissionDenied, bad exe format, BatBadBut-rejected args… — a
+            // "command not found" lie here sent agents down wrong recovery paths.
+            (format!("{}: spawn failed: {}", cmd[0], e), 126)
+        }
     };
     if let Ok(mut g) = LAST_RAW.lock() {
         *g = s.clone();
@@ -683,10 +821,51 @@ fn run_raw(cmd: &[String]) -> (String, i32) {
     (s, code)
 }
 
+/// Write via tmp-file + rename so a concurrent reader (`tok full` in another
+/// agent window) never sees a half-written file. Windows rename won't replace,
+/// so best-effort remove first — the unreadable window shrinks to ~zero.
+fn atomic_write(path: &str, data: &[u8]) {
+    let tmp = format!("{}.tmp{}", path, std::process::id());
+    if fs::write(&tmp, data).is_ok() {
+        let _ = fs::remove_file(path);
+        if fs::rename(&tmp, path).is_err() {
+            let _ = fs::write(path, data); // fallback: plain write
+            let _ = fs::remove_file(&tmp);
+        }
+    } else {
+        let _ = fs::write(path, data);
+    }
+}
+
+/// Keep at most `keep` newest files in `dir` (by mtime; name as tiebreak).
+/// Amortized: only does work when the dir has grown past keep + 20.
+fn prune_dir(dir: &str, keep: usize) {
+    let entries: Vec<_> = match fs::read_dir(dir) {
+        Ok(rd) => rd.flatten().collect(),
+        Err(_) => return,
+    };
+    if entries.len() <= keep + 20 {
+        return;
+    }
+    let mut with_time: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
+        .into_iter()
+        .map(|e| {
+            let t = e.metadata().and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            (t, e.path())
+        })
+        .collect();
+    with_time.sort();
+    let n = with_time.len();
+    for (_, p) in with_time.into_iter().take(n.saturating_sub(keep)) {
+        let _ = fs::remove_file(p);
+    }
+}
+
 fn save_raw(cmd: &[String], raw: &str, code: i32) {
     let dir = cache_dir();
     let _ = fs::create_dir_all(&dir);
-    let _ = fs::write(format!("{}/last.txt", dir), raw);
+    atomic_write(&format!("{}/last.txt", dir), raw.as_bytes());
     // rolling history (last 20 raw outputs) for `tok full [n]`
     let rdir = format!("{}/raw", dir);
     let _ = fs::create_dir_all(&rdir);
@@ -696,7 +875,10 @@ fn save_raw(cmd: &[String], raw: &str, code: i32) {
         .unwrap_or(0);
     let label: String = cmd.first().map(|s| basename(s)).unwrap_or("cmd")
         .chars().filter(|c| c.is_ascii_alphanumeric()).take(12).collect();
-    let _ = fs::write(format!("{}/{}_{}.txt", rdir, ts, label), raw);
+    // pid in the name: two same-labelled commands in the same millisecond must
+    // not overwrite each other's ring slot
+    atomic_write(&format!("{}/{}_{}_{}.txt", rdir, ts, std::process::id(), label),
+                 raw.as_bytes());
     if let Ok(rd) = fs::read_dir(&rdir) {
         let mut names: Vec<String> = rd.flatten()
             .map(|e| e.file_name().to_string_lossy().into_owned()).collect();
@@ -753,13 +935,15 @@ fn track(cmd: &[String], raw: &str, filtered: &str) {
     if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
         let _ = f.write_all(line.as_bytes());
     }
-    // bounded footprint: keep stats under ~256 KB (rtk's SQLite grows unbounded)
+    // bounded footprint: keep stats under ~512 KB (rtk's SQLite grows unbounded).
+    // Trim lazily at 2x the target and write atomically, so a concurrent
+    // appender loses at worst a delayed trim — not its appended line.
     if let Ok(md) = fs::metadata(&path) {
-        if md.len() > 262_144 {
+        if md.len() > 524_288 {
             if let Ok(data) = fs::read_to_string(&path) {
                 let lines: Vec<&str> = data.lines().collect();
                 let keep = &lines[lines.len() / 2..];
-                let _ = fs::write(&path, format!("{}\n", keep.join("\n")));
+                atomic_write(&path, format!("{}\n", keep.join("\n")).as_bytes());
             }
         }
     }
@@ -822,10 +1006,10 @@ fn render_diff(prev: &str, new: &str) -> Option<String> {
     }
     let mut out: Vec<String> = Vec::new();
     for l in removed.iter().take(20) {
-        out.push(format!("- {}", strip_ansi(l).trim_end()));
+        out.push(format!("- {}", cap_line(strip_ansi(l).trim_end())));
     }
     for l in added.iter().take(20) {
-        out.push(format!("+ {}", strip_ansi(l).trim_end()));
+        out.push(format!("+ {}", cap_line(strip_ansi(l).trim_end())));
     }
     Some(out.join("\n"))
 }
@@ -842,7 +1026,12 @@ fn session_dedup(cmd: &[String], raw: &str, code: i32, filtered: &str) -> Option
     let cwd = env::current_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let key = format!("{:016x}", fnv(&format!("{}|{}", cmd.join(" "), cwd)));
+    // Key mixes the agent session id: "unchanged since last run" across two
+    // different agent sessions/windows would tell a fresh LLM its context
+    // already holds output it has NEVER seen. NUL join also stops
+    // `grep "a b" x` / `grep a b x` from aliasing to one key.
+    let key = format!("{:016x}",
+        fnv(&format!("{}|{}|{}", cmd.join("\x00"), cwd, current_session())));
     let dir = format!("{}/state", cache_dir());
     let _ = fs::create_dir_all(&dir);
     let path = format!("{}/{}.txt", dir, key);
@@ -851,11 +1040,24 @@ fn session_dedup(cmd: &[String], raw: &str, code: i32, filtered: &str) -> Option
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let prev = fs::read_to_string(&path).ok();
-    let _ = fs::write(&path, format!("{}\n{}", now, raw));
+    // Huge outputs: store a hash sentinel instead of the full raw — the
+    // "unchanged" check only needs equality, render_diff bails on big changes
+    // anyway, and full-raw state files never got pruned (unbounded disk leak).
+    let payload = if raw.len() > 4 * 1024 * 1024 {
+        format!("#H:{:016x}:{}", fnv(raw), raw.len())
+    } else {
+        raw.to_string()
+    };
+    atomic_write(&path, format!("{}\n{}", now, payload).as_bytes());
+    prune_dir(&dir, 200);
     let (ts_line, prev_raw) = prev.as_ref()?.split_once('\n')?;
-    let ago = fmt_ago(now.saturating_sub(ts_line.parse().ok()?));
+    let age = now.saturating_sub(ts_line.parse().ok()?);
+    if age > 4 * 3600 {
+        return None; // stale: don't claim "unchanged" against yesterday's run
+    }
+    let ago = fmt_ago(age);
     let ftoks = filtered.split_whitespace().count();
-    if prev_raw == raw {
+    if prev_raw == payload {
         let mut msg = format!("unchanged since last run ({} ago) [tok full]", ago);
         if code != 0 {
             msg.push_str(&format!("\nexit {}", code));
@@ -864,6 +1066,9 @@ fn session_dedup(cmd: &[String], raw: &str, code: i32, filtered: &str) -> Option
             return Some(msg);
         }
         return None;
+    }
+    if prev_raw.starts_with("#H:") || payload.starts_with("#H:") {
+        return None; // at least one side is a hash sentinel — no diff possible
     }
     let diff = render_diff(prev_raw, raw)?;
     let mut msg = format!("changes vs run {} ago [tok full]:\n{}", ago, diff);
@@ -912,10 +1117,25 @@ fn ls_ext_groups(files: &[(String, u64)]) -> Vec<String> {
     let mut groups: HashMap<String, (usize, u64)> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
     for (name, sz) in files {
-        let ext = match name.rsplit_once('.') {
-            Some((stem, e)) if !stem.is_empty() && !e.is_empty() => e.to_ascii_lowercase(),
-            _ => String::from("noext"),
-        };
+        let mut rest = name.as_str();
+        let mut ext = String::from("noext");
+        // walk extensions right-to-left, skipping pure-numeric ones: rotated
+        // logs (app.log.1 … app.log.99999) otherwise mint one "extension" per
+        // file and the huge-dir summary becomes as long as the listing itself
+        for _ in 0..3 {
+            match rest.rsplit_once('.') {
+                Some((stem, e)) if !stem.is_empty() && !e.is_empty() => {
+                    if e.chars().all(|c| c.is_ascii_digit()) {
+                        rest = stem;
+                        ext = String::from("numbered");
+                        continue;
+                    }
+                    ext = e.to_ascii_lowercase();
+                    break;
+                }
+                _ => break,
+            }
+        }
         if !groups.contains_key(&ext) {
             order.push(ext.clone());
         }
@@ -924,8 +1144,9 @@ fn ls_ext_groups(files: &[(String, u64)]) -> Vec<String> {
         g.1 += *sz;
     }
     order.sort_by(|a, b| groups[b].0.cmp(&groups[a].0).then_with(|| a.cmp(b)));
-    order
+    let mut out: Vec<String> = order
         .iter()
+        .take(30)
         .map(|e| {
             let (n, sz) = groups[e];
             if sz >= 1024 {
@@ -934,7 +1155,16 @@ fn ls_ext_groups(files: &[(String, u64)]) -> Vec<String> {
                 format!("{}:{}", e, n)
             }
         })
-        .collect()
+        .collect();
+    if order.len() > 30 {
+        let (files_rest, sz_rest) = order.iter().skip(30)
+            .fold((0usize, 0u64), |(fc, sc), e| {
+                let (n, sz) = groups[e];
+                (fc + n, sc + sz)
+            });
+        out.push(format!("+{} more exts:{}:{}", order.len() - 30, files_rest, human(sz_rest)));
+    }
+    out
 }
 
 fn h_ls(args: &[String]) -> (String, i32) {
@@ -1065,6 +1295,28 @@ fn h_find(cmd: &[String]) -> (String, i32) {
     (generic_filter(&out.join("\n"), code, 80), code)
 }
 
+/// Parse one `file:line:content` grep/rg output line. Windows absolute paths
+/// start with a drive prefix (`C:\…`) whose colon is NOT the separator — the
+/// old first-colon parse dumped every such line into the unparsed bucket.
+fn parse_grep_line(ln: &str) -> Option<(String, String, String)> {
+    let b = ln.as_bytes();
+    // skip a drive prefix like `C:\` / `C:/` when hunting for the separator
+    let start = if b.len() > 2 && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/')
+        && (b[0] as char).is_ascii_alphabetic() {
+        2
+    } else {
+        0
+    };
+    let c1 = start + ln[start..].find(':')?;
+    let c2 = c1 + 1 + ln[c1 + 1..].find(':')?;
+    let num = &ln[c1 + 1..c2];
+    if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) && c1 <= 200 {
+        Some((ln[..c1].to_string(), num.to_string(), ln[c2 + 1..].trim().to_string()))
+    } else {
+        None
+    }
+}
+
 fn h_grep(cmd: &[String]) -> (String, i32) {
     let (raw, code) = run_raw(cmd);
     let text = strip_ansi(&raw);
@@ -1075,19 +1327,7 @@ fn h_grep(cmd: &[String]) -> (String, i32) {
         if ln.trim().is_empty() {
             continue;
         }
-        // parse file:line:content
-        let mut parsed = None;
-        if let Some(c1) = ln.find(':') {
-            if let Some(c2_rel) = ln[c1 + 1..].find(':') {
-                let c2 = c1 + 1 + c2_rel;
-                let num = &ln[c1 + 1..c2];
-                if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) && c1 <= 200 {
-                    parsed = Some((ln[..c1].to_string(), num.to_string(),
-                                   ln[c2 + 1..].trim().to_string()));
-                }
-            }
-        }
-        match parsed {
+        match parse_grep_line(ln) {
             Some((f, num, content)) => {
                 let content: String = content.chars().take(90).collect();
                 if !groups.contains_key(&f) {
@@ -1096,7 +1336,8 @@ fn h_grep(cmd: &[String]) -> (String, i32) {
                 }
                 groups.get_mut(&f).unwrap().push((num, content));
             }
-            None => misc.push(ln.to_string()),
+            // cap: a bare match line from a minified file is a 2 MB token bomb
+            None => misc.push(cap_line(ln)),
         }
     }
     // global grouping by content
@@ -1134,9 +1375,16 @@ fn h_grep(cmd: &[String]) -> (String, i32) {
     if corder.len() > 25 {
         out.push(format!("...+{} distinct matches [tok full]", corder.len() - 25));
     }
+    let misc_total = misc.len();
     out.extend(misc.into_iter().take(10));
+    if misc_total > 10 {
+        // silent truncation looked like a complete result set to the agent
+        out.push(format!("...+{} more lines [tok full]", misc_total - 10));
+    }
     if !order.is_empty() {
         out.insert(0, format!("{} matches in {} files", total_hits, order.len()));
+    } else if misc_total > 0 {
+        out.insert(0, format!("{} unparsed match lines", misc_total));
     }
     let text_out = out.join("\n");
     let lines: Vec<&str> = text_out.split('\n').collect();
@@ -1484,44 +1732,90 @@ fn basename(p: &str) -> &str {
 
 /// Compact file read: blank-squeeze + head/tail cap. Errors and content
 /// stay verbatim — this is for reading code, not logs.
+/// Read a text file tolerantly: UTF-8 first, then UTF-16 by BOM, then a
+/// BOM-less UTF-16LE heuristic (PowerShell `>` / `Out-File` default on
+/// Windows 5.1 writes UTF-16LE — a hard "invalid UTF-8" error here was a
+/// dead end for reading perfectly good logs), then lossy UTF-8.
+fn read_text_flex(p: &str) -> std::io::Result<String> {
+    let bytes = fs::read(p)?;
+    let utf16 = |b: &[u8], le: bool| -> String {
+        let u: Vec<u16> = b.chunks_exact(2)
+            .map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) })
+            .collect();
+        String::from_utf16_lossy(&u)
+    };
+    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+        return Ok(utf16(&bytes[2..], true));
+    }
+    if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
+        return Ok(utf16(&bytes[2..], false));
+    }
+    // BOM-less UTF-16LE heuristic MUST run before the UTF-8 attempt: ASCII text
+    // in UTF-16LE ("P\0S\0…") is *valid* UTF-8 with embedded NULs, so a
+    // from_utf8-first order would "succeed" and return NUL-riddled garbage.
+    let nuls = bytes.iter().filter(|b| **b == 0).count();
+    if bytes.len() >= 4 && nuls * 3 > bytes.len() {
+        return Ok(utf16(&bytes, true));
+    }
+    match String::from_utf8(bytes) {
+        Ok(s) => Ok(s),
+        Err(e) => Ok(String::from_utf8_lossy(&e.into_bytes()).into_owned()),
+    }
+}
+
 fn h_read(args: &[String]) -> (String, i32) {
     let paths: Vec<&String> = args.iter().filter(|a| !a.starts_with('-')).collect();
     if paths.is_empty() {
         return ("tok read: no file".into(), 2);
     }
     let mut out: Vec<String> = Vec::new();
+    let mut raws: Vec<String> = Vec::new();
     let mut code = 0;
     for p in paths {
-        match fs::read_to_string(p) {
+        match read_text_flex(p) {
             Ok(data) => {
-                let mut lines: Vec<&str> = Vec::new();
+                raws.push(data.clone());
+                let mut lines: Vec<String> = Vec::new();
                 let mut blank = false;
                 for l in data.lines() {
                     if l.trim().is_empty() {
                         if !blank && !lines.is_empty() {
-                            lines.push("");
+                            lines.push(String::new());
                         }
                         blank = true;
                     } else {
                         blank = false;
-                        lines.push(l.trim_end());
+                        // cap line LENGTH — a minified/base64 line must not
+                        // become a token bomb (recoverable via tok full)
+                        lines.push(cap_line(l.trim_end()));
                     }
                 }
                 let n = lines.len();
                 out.push(format!("== {} ({} lines, {})", p, data.lines().count(),
                                  human(data.len() as u64)));
                 if n > 300 {
-                    out.extend(lines[..220].iter().map(|s| s.to_string()));
+                    out.extend(lines[..220].iter().cloned());
                     out.push(format!("... {} lines omitted [tok full] ...", n - 270));
-                    out.extend(lines[n - 50..].iter().map(|s| s.to_string()));
+                    out.extend(lines[n - 50..].iter().cloned());
                 } else {
-                    out.extend(lines.iter().map(|s| s.to_string()));
+                    out.extend(lines.iter().cloned());
                 }
             }
             Err(e) => {
                 out.push(format!("tok read {}: {}", p, e));
                 code = 1;
             }
+        }
+    }
+    // publish the FULL decoded content as this run's raw, so `tok full` after a
+    // `tok cat` really recovers the whole file — the "[tok full]" markers in the
+    // truncated view must not lie (they used to: h_read never set LAST_RAW).
+    if !raws.is_empty() {
+        if let Ok(mut g) = LAST_RAW.lock() {
+            *g = raws.join("\n");
+        }
+        if let Ok(mut g) = LAST_CODE.lock() {
+            *g = code;
         }
     }
     (out.join("\n"), code)
@@ -1657,13 +1951,13 @@ fn dispatch_inner(cmd: &[String]) -> i32 {
             (generic_filter(&raw, code, max_lines_default()), code)
         }
     };
-    let global_raw = LAST_RAW.lock().map(|g| g.clone()).unwrap_or_default();
+    // clone the global raw only when actually needed — for big outputs the
+    // unconditional clone was one more full copy of a multi-MB string
     let raw_owned: String = if !last_raw.is_empty() {
         last_raw
-    } else if !global_raw.is_empty() {
-        global_raw
     } else {
-        filtered.clone()
+        let global_raw = LAST_RAW.lock().map(|g| g.clone()).unwrap_or_default();
+        if !global_raw.is_empty() { global_raw } else { filtered.clone() }
     };
     save_raw(cmd, &raw_owned, code);
     track(cmd, &raw_owned, &filtered);
@@ -2342,6 +2636,114 @@ mod tests {
         assert_eq!(resolve_cr("x\r\r\r\n"), "x\n");
         // a real redraw before a doubled-CR terminator still keeps the final frame
         assert_eq!(resolve_cr("downloading\r100%\r\r\n"), "100%\n");
+    }
+
+    #[test]
+    fn strip_ansi_osc_st_does_not_swallow_stream() {
+        // OSC terminated by ST (ESC \) — hyperlinks/titles; BEL-only scanning
+        // used to eat EVERYTHING after the sequence, errors included.
+        let s = "before\n\u{1b}]0;title\u{1b}\\after-osc\nERROR: real failure\ntail\n";
+        let out = strip_ansi(s);
+        assert!(out.contains("before"));
+        assert!(out.contains("after-osc"));
+        assert!(out.contains("ERROR: real failure"));
+        assert!(out.contains("tail"));
+        // BEL-terminated still works
+        assert_eq!(strip_ansi("a\u{1b}]0;t\u{7}b"), "ab");
+        // truncated OSC (no terminator): capped scan must not eat >4KB
+        let trunc = format!("x\u{1b}]8;;{}{}", "u".repeat(8000), "\nERROR tail");
+        assert!(strip_ansi(&trunc).contains("ERROR tail"));
+    }
+
+    #[test]
+    fn grep_parse_handles_windows_drive_paths() {
+        // C:\path\file.rs:12:content — the drive colon is not the separator
+        let p = parse_grep_line(r"C:\repo\src\main.rs:12:    let x = 5;");
+        assert_eq!(p, Some(("C:\\repo\\src\\main.rs".into(), "12".into(), "let x = 5;".into())));
+        let p2 = parse_grep_line("src/lib.rs:7:fn foo()");
+        assert_eq!(p2, Some(("src/lib.rs".into(), "7".into(), "fn foo()".into())));
+        // no line number -> unparsed
+        assert_eq!(parse_grep_line("just a matching line"), None);
+        assert_eq!(parse_grep_line(r"C:\x\y.txt"), None);
+    }
+
+    #[test]
+    fn ls_ext_groups_rotated_logs_collapse() {
+        // app.log.0 … app.log.2999 must NOT mint one group per numeric suffix
+        let files: Vec<(String, u64)> = (0..3000).map(|i| (format!("app.log.{}", i), 1024)).collect();
+        let g = ls_ext_groups(&files);
+        assert!(g.len() <= 31, "groups = {}", g.len());
+        // numeric suffix stripped → grouped under the TRUE extension
+        assert!(g[0].starts_with("log:3000"), "g[0] = {}", g[0]);
+        // and many DISTINCT real extensions get capped with a summary line
+        let many: Vec<(String, u64)> = (0..200).map(|i| (format!("f{}.zz{}x", i, i), 10)).collect();
+        let g2 = ls_ext_groups(&many);
+        assert!(g2.len() <= 31, "g2 = {}", g2.len());
+        assert!(g2.last().unwrap().contains("more exts"), "last = {}", g2.last().unwrap());
+    }
+
+    #[test]
+    fn capbuf_caps_head_and_tail() {
+        let mut cb = CapBuf::new(10);
+        cb.push(b"0123456789");          // fills head
+        cb.push(b"abcdefghijklmnopqrst"); // tail keeps last 10
+        assert_eq!(cb.head, b"0123456789");
+        assert_eq!(cb.dropped, 10);
+        let m = cb.merge();
+        assert!(m.starts_with("0123456789"));
+        assert!(m.contains("bytes omitted"));
+        assert!(m.ends_with("klmnopqrst"));
+        // under the cap: verbatim, no marker
+        let mut cb2 = CapBuf::new(100);
+        cb2.push(b"hello world");
+        assert_eq!(cb2.merge(), "hello world");
+    }
+
+    #[test]
+    fn giant_line_is_capped_not_a_token_bomb() {
+        // one huge minified line must be capped by LENGTH, with a recovery marker
+        let bomb = format!("var x={}", "a".repeat(100_000));
+        let out = generic_filter(&bomb, 0, 60);
+        assert!(out.len() < 3_000, "output {} bytes — token bomb!", out.len());
+        assert!(out.contains("[tok full]"));
+        assert!(out.contains("...(+"));
+        // short lines are untouched
+        assert_eq!(cap_line("short line"), "short line");
+        // char-safe on multibyte content
+        let uni = "ż".repeat(3_000);
+        let capped = cap_line(&uni);
+        assert!(capped.starts_with(&"ż".repeat(10)));
+        assert!(capped.contains("...(+1000 chars)"));
+    }
+
+    #[test]
+    fn read_text_flex_decodes_utf16() {
+        let dir = env::temp_dir();
+        let p16 = dir.join("tok_t_utf16le.txt");
+        // UTF-16LE with BOM: "log ok\nż"
+        let mut b: Vec<u8> = vec![0xFF, 0xFE];
+        for u in "log ok\nż".encode_utf16() {
+            b.extend_from_slice(&u.to_le_bytes());
+        }
+        fs::write(&p16, &b).unwrap();
+        let s = read_text_flex(p16.to_str().unwrap()).unwrap();
+        assert_eq!(s, "log ok\nż");
+        // BOM-less UTF-16LE (NUL-dense heuristic)
+        let p16n = dir.join("tok_t_utf16le_nobom.txt");
+        let mut b2: Vec<u8> = Vec::new();
+        for u in "PSLOG alpha beta gamma".encode_utf16() {
+            b2.extend_from_slice(&u.to_le_bytes());
+        }
+        fs::write(&p16n, &b2).unwrap();
+        let s2 = read_text_flex(p16n.to_str().unwrap()).unwrap();
+        assert!(s2.contains("PSLOG alpha"));
+        // plain UTF-8 still verbatim
+        let p8 = dir.join("tok_t_utf8.txt");
+        fs::write(&p8, "zwykły utf8 ąćę").unwrap();
+        assert_eq!(read_text_flex(p8.to_str().unwrap()).unwrap(), "zwykły utf8 ąćę");
+        let _ = fs::remove_file(p16);
+        let _ = fs::remove_file(p16n);
+        let _ = fs::remove_file(p8);
     }
 
     #[test]
