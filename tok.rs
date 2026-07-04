@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 static LAST_RAW: Mutex<String> = Mutex::new(String::new());
 static LAST_CODE: Mutex<i32> = Mutex::new(0);
 
-const VERSION: &str = "0.3.4";
+const VERSION: &str = "0.3.5";
 const HEAD_KEEP: usize = 12;
 const TAIL_KEEP: usize = 18;
 const LS_GROUP_MIN: usize = 200;
@@ -2011,21 +2011,78 @@ fn tool_input_range(j: &str) -> Option<(usize, usize)> {
     None
 }
 
+/// Find the opening quote of the STRING value of a TOP-LEVEL `key` in the JSON
+/// object substring `obj` (which begins at or before its `{`). Depth- and
+/// string-aware: a `"command"` nested inside another object, or one appearing
+/// as a sibling's string *value*, must never be mistaken for the real key —
+/// otherwise tok splices into the wrong field and corrupts the envelope.
+/// `key` is the bare name without quotes (e.g. "command").
+fn top_level_value_quote(obj: &str, key: &str) -> Option<usize> {
+    let b = obj.as_bytes();
+    let mut i = 0;
+    while i < b.len() && b[i] != b'{' {
+        i += 1;
+    }
+    if i >= b.len() {
+        return None;
+    }
+    i += 1;
+    let mut depth = 1usize;
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                let start = i;
+                i += 1;
+                while i < b.len() {
+                    if b[i] == b'\\' {
+                        i += 2;
+                        continue;
+                    }
+                    if b[i] == b'"' {
+                        break;
+                    }
+                    i += 1;
+                }
+                if i >= b.len() {
+                    return None; // unterminated string
+                }
+                let content_end = i; // index of the closing quote
+                i += 1;
+                if depth == 1 {
+                    // a key only if the next non-space byte is ':'
+                    let mut j = i;
+                    while j < b.len() && (b[j] as char).is_ascii_whitespace() {
+                        j += 1;
+                    }
+                    if j < b.len() && b[j] == b':'
+                        && &obj[start + 1..content_end] == key
+                    {
+                        j += 1;
+                        while j < b.len() && (b[j] as char).is_ascii_whitespace() {
+                            j += 1;
+                        }
+                        return if j < b.len() && b[j] == b'"' { Some(j) } else { None };
+                    }
+                }
+                continue; // i already past the string
+            }
+            b'{' | b'[' => depth += 1,
+            b'}' | b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
 /// Within a JSON object substring, find the value-start quote of "command".
 fn command_value_quote(obj: &str) -> Option<usize> {
-    let k = obj.find("\"command\"")?;
-    let after = &obj[k + 9..];
-    let colon = after.find(':')?;
-    let mut idx = k + 9 + colon + 1;
-    let b = obj.as_bytes();
-    while idx < b.len() && (b[idx] as char).is_whitespace() {
-        idx += 1;
-    }
-    if idx < b.len() && b[idx] == b'"' {
-        Some(idx)
-    } else {
-        None
-    }
+    top_level_value_quote(obj, "command")
 }
 
 /// Brace-matched object that follows `key` (e.g. "\"toolCall\""). Generic
@@ -2061,22 +2118,51 @@ fn object_after_key(j: &str, key: &str) -> Option<(usize, usize)> {
     None
 }
 
-/// Opening-quote position of the string value for `key` inside `obj`. Generic
-/// sibling of command_value_quote (which is hardwired to "command").
+/// Opening-quote of the string value of the FIRST genuine `key` at any depth,
+/// string-aware. Used for envelopes (Antigravity) that nest the target one
+/// level down (toolCall.args.CommandLine), where a strict top-level match
+/// would miss it. Still safe against decoys: a sibling whose string VALUE is
+/// the word `key` is not followed by ':' so it is never treated as a key.
+/// `key` is passed quoted (e.g. `"\"CommandLine\""`).
 fn quoted_value_pos(obj: &str, key: &str) -> Option<usize> {
-    let k = obj.find(key)?;
-    let after = &obj[k + key.len()..];
-    let colon = after.find(':')?;
-    let mut idx = k + key.len() + colon + 1;
+    let bare = key.trim_matches('"');
     let b = obj.as_bytes();
-    while idx < b.len() && (b[idx] as char).is_whitespace() {
-        idx += 1;
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'"' {
+            let start = i;
+            i += 1;
+            while i < b.len() {
+                if b[i] == b'\\' {
+                    i += 2;
+                    continue;
+                }
+                if b[i] == b'"' {
+                    break;
+                }
+                i += 1;
+            }
+            if i >= b.len() {
+                return None;
+            }
+            let content_end = i;
+            i += 1;
+            let mut j = i;
+            while j < b.len() && (b[j] as char).is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < b.len() && b[j] == b':' && &obj[start + 1..content_end] == bare {
+                j += 1;
+                while j < b.len() && (b[j] as char).is_ascii_whitespace() {
+                    j += 1;
+                }
+                return if j < b.len() && b[j] == b'"' { Some(j) } else { None };
+            }
+            continue;
+        }
+        i += 1;
     }
-    if idx < b.len() && b[idx] == b'"' {
-        Some(idx)
-    } else {
-        None
-    }
+    None
 }
 
 fn parse_json_string(s: &str) -> Option<String> {
@@ -2859,6 +2945,30 @@ mod tests {
         assert_eq!(human(800), "800B");
         assert_eq!(human(25 * 1024 + 512), "25.5K");
         assert_eq!(human(2 * 1024 * 1024), "2M");
+    }
+
+    #[test]
+    fn command_value_quote_ignores_nested_and_sibling_values() {
+        // real top-level command, nested object also has a "command" key first
+        let obj = r#"{"opts":{"command":"FAKE"},"command":"git status"}"#;
+        let q = command_value_quote(obj).unwrap();
+        assert_eq!(parse_json_string(&obj[q..]).unwrap(), "git status");
+        // a sibling whose VALUE is the word command must not win
+        let obj2 = r#"{"note":"command","command":"git log"}"#;
+        let q2 = command_value_quote(obj2).unwrap();
+        assert_eq!(parse_json_string(&obj2[q2..]).unwrap(), "git log");
+        // description holding escaped "command":"x" must not win
+        let obj3 = r#"{"description":"see \"command\": \"evil\"","command":"git diff"}"#;
+        let q3 = command_value_quote(obj3).unwrap();
+        assert_eq!(parse_json_string(&obj3[q3..]).unwrap(), "git diff");
+        // command last, many siblings before
+        let obj4 = r#"{"timeout":5000,"cwd":"C:/y","command":"npm test"}"#;
+        let q4 = command_value_quote(obj4).unwrap();
+        assert_eq!(parse_json_string(&obj4[q4..]).unwrap(), "npm test");
+        // no command key at all
+        assert!(command_value_quote(r#"{"description":"x"}"#).is_none());
+        // command present but value not a string
+        assert!(command_value_quote(r#"{"command":["a","b"]}"#).is_none());
     }
 
     #[test]

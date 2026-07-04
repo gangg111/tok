@@ -4,6 +4,22 @@ All notable changes to **tok** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/); tok follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.5] — 2026-07-04
+
+### Fixed
+- **Hook rewrote a NESTED `command`, not the real one.** The hand-rolled JSON
+  splice located the command field with a plain substring search for
+  `"command"`, so a `tool_input` that nested an object with its own `command`
+  key — `{"opts":{"command":"git log"},"command":"git status"}` — had the
+  *nested* value rewritten (→ `"opts":{"command":"tok git log"}`) while the
+  real top-level command was left un-proxied. The finder is now depth- and
+  string-aware: `command` is matched only as a **top-level** key of
+  `tool_input`, and the Antigravity path (`toolCall.args.CommandLine`, one
+  level down) matches the first genuine *key* rather than any substring — a
+  sibling whose string *value* happens to be the word `command` can no longer
+  win. Found by an adversarial hook-envelope fuzz (13 crafted cases), proven
+  live before/after. (`tok.py` parses with `json`, so it was never affected.)
+
 ## [0.3.4] — 2026-07-04
 
 Heavy-load audit: a 36-check battery of adversarial real-command tests plus a
